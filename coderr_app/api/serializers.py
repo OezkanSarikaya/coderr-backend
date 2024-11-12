@@ -1,57 +1,84 @@
 from rest_framework import serializers
-from coderr_app.models import Profile
+from coderr_app.models import Profile, Offer, Order, OfferDetail, Review
 from django.contrib.auth.models import User
 from django.conf import settings  # Für Zugriff auf MEDIA_URL
 
-class UserPatchSerializer(serializers.ModelSerializer):
+
+class ReviewSerializer(serializers.ModelSerializer):
     class Meta:
-        model = User
-        fields = ['pk','first_name', 'last_name']
+        model = Review
+        fields = '__all__'
+
+
+class OrderSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Order
+        fields = '__all__'
+
+
+class OfferDetailSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = OfferDetail
+        fields = '__all__'
+
+
+class OfferSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Offer
+        fields = '__all__'
 
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ['pk', 'username', 'first_name', 'last_name'] 
+        fields = ['id', 'username', 'first_name', 'last_name']
+
 
 class ProfileSerializer(serializers.ModelSerializer):
-    # user = UserSerializer()
+    user = serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.all())  # ID des Users
+    username = serializers.CharField(source="user.username", read_only=True)
+    first_name = serializers.CharField(
+        source="user.first_name", read_only=True)
+    last_name = serializers.CharField(source="user.last_name", read_only=True)
     file = serializers.FileField(required=False)
+
     class Meta:
         model = Profile
         # fields = '__all__'
-        fields = ['user', 'file','location', 'tel', 'description', 'working_hours','type', 'email', 'created_at']
+        fields = [
+            'user',           # Benutzer-ID
+            'username',       # Benutzername
+            'first_name',     # Vorname
+            'last_name',      # Nachname
+            'file',
+            'location',
+            'tel',
+            'description',
+            'working_hours',
+            'type',
+            'email',
+            'created_at'
+        ]
         extra_kwargs = {
-            'file': {'required': False}  # Das Feld `file` ist nicht erforderlich
+            # Das Feld `file` ist nicht erforderlich
+            'file': {'required': False}
         }
 
     def to_representation(self, instance):
         representation = super().to_representation(instance)
-        
+
+        user_data = {
+            "user": instance.user.id,
+            "username": instance.user.username,
+            "first_name": instance.user.first_name,
+            "last_name": instance.user.last_name
+        }
+
+        representation.update(user_data)
         # Überprüfen, ob das Feld `file` einen Wert hat und füge nur den relativen Pfad hinzu
         if instance.file:
             # MEDIA_URL direkt verwenden, um doppelte URLs zu vermeiden
             representation['file'] = f"{settings.MEDIA_URL}{instance.file}"
-        
+
         return representation
-
-    # def get_file(self, obj):
-    #     # Nur den relativen Pfad (ohne Domain) zurückgeben
-    #     if obj.file and hasattr(obj.file, 'url'):
-    #         return obj.file.url.lstrip('/')
-    #     return None
-    
-    # def update(self, instance, validated_data):
-    #     # Wenn Benutzerdaten vorhanden sind, aktualisiere sie
-    #     user_data = validated_data.pop('user', None)
-    #     if user_data:
-    #         user_instance = instance.user
-    #         user_instance.first_name = user_data.get('first_name', user_instance.first_name)
-    #         user_instance.last_name = user_data.get('last_name', user_instance.last_name)
-    #         user_instance.save()
-
-    #     # Aktualisiere die anderen Felder des Profil-Objekts
-    #     for attr, value in validated_data.items():
-    #         setattr(instance, attr, value)
-    #     instance.save()
-    #     return instance
