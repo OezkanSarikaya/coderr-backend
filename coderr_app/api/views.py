@@ -1,5 +1,5 @@
 
-from rest_framework import viewsets #, generics, permissions, filters
+from rest_framework import viewsets, filters #, generics, permissions, filters
 from coderr_app.models import Profile, Offer, Order, OfferDetail, Review
 from .serializers import ProfileSerializer, UserSerializer, OfferSerializer, OrderSerializer, OfferDetailSerializer, ReviewSerializer
 from rest_framework.response import Response
@@ -10,6 +10,13 @@ from rest_framework.views import APIView
 from django.contrib.auth.models import User
 # from rest_framework.decorators import action
 from django.shortcuts import get_object_or_404
+from rest_framework.pagination import PageNumberPagination
+from django_filters.rest_framework import DjangoFilterBackend
+
+class LargeResultsSetPagination(PageNumberPagination):
+    page_size = 5 # Standard Anzahl pro Seite
+    page_size_query_param = 'page_size' # Parameter Anzahl pro Seite
+    max_page_size = 100
 
 class ReviewViewSet(viewsets.ModelViewSet):
     queryset = Review.objects.all()
@@ -22,10 +29,15 @@ class OfferDetailsViewSet(viewsets.ModelViewSet):
 class OrderViewSet(viewsets.ModelViewSet):
     queryset = Order.objects.all()
     serializer_class = OrderSerializer
+    
 
 class OfferViewSet(viewsets.ModelViewSet):
     queryset = Offer.objects.all()
     serializer_class = OfferSerializer
+    pagination_class = LargeResultsSetPagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    ordering_fields = ['updated_at'] 
+    search_fields = ['title','description'] 
 #     # permission_classes = [IsAuthenticated]
 
 #     def get(self, request, pk):
