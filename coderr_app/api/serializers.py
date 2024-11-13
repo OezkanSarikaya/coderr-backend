@@ -18,9 +18,12 @@ class OfferDetailLinkSerializer(serializers.ModelSerializer):
 
 
 class ReviewSerializer(serializers.ModelSerializer):
+
+    reviewer = serializers.ReadOnlyField(source='reviewer.id')
     class Meta:
         model = Review
-        fields = '__all__'
+        # fields = '__all__'
+        fields = ['id', 'business_user', 'reviewer', 'rating', 'description', 'created_at', 'updated_at']
 
 
 class OrderSerializer(serializers.ModelSerializer):

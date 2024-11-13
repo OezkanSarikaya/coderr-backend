@@ -1,9 +1,9 @@
 
-from rest_framework import viewsets, filters  # , generics, permissions, filters
+from rest_framework import viewsets, filters, generics, permissions
 from coderr_app.models import Profile, Offer, Order, OfferDetail, Review
 from .serializers import ProfileSerializer, UserSerializer, OfferSerializer, OrderSerializer, OfferDetailSerializer, ReviewSerializer
 from rest_framework.response import Response
-# from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework import status
 from rest_framework.views import APIView
 # from rest_framework.exceptions import NotFound
@@ -13,8 +13,11 @@ from django.shortcuts import get_object_or_404
 from rest_framework.pagination import PageNumberPagination
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Avg
+from rest_framework.exceptions import AuthenticationFailed
+from rest_framework.permissions import AllowAny
 
 class BaseInfo(APIView):
+    permission_classes = [AllowAny] 
     def get(self, *args, **kwargs):
         # Filter für laufende Bestellungen (`in_progress`)
         review_count = Review.objects.count()
@@ -63,6 +66,19 @@ class LargeResultsSetPagination(PageNumberPagination):
 class ReviewViewSet(viewsets.ModelViewSet):
     queryset = Review.objects.all()
     serializer_class = ReviewSerializer
+    permission_classes = [IsAuthenticatedOrReadOnly] 
+    filter_backends = [DjangoFilterBackend,
+                       filters.SearchFilter, filters.OrderingFilter]   
+    filterset_fields = ['business_user_id', 'reviewer_id']
+    ordering_fields = ['updated_at','rating']
+
+    def perform_create(self, serializer):
+        # Überprüfen, ob der Benutzer authentifiziert ist
+        if not self.request.user.is_authenticated:
+            raise AuthenticationFailed("You must be logged in to create a review.")
+        
+        # Falls der Benutzer authentifiziert ist, setze den reviewer auf self.request.user
+        serializer.save(reviewer=self.request.user)
 
 
 class OfferDetailsViewSet(viewsets.ModelViewSet):
@@ -73,11 +89,13 @@ class OfferDetailsViewSet(viewsets.ModelViewSet):
 class OrderViewSet(viewsets.ModelViewSet):
     queryset = Order.objects.all()
     serializer_class = OrderSerializer
+    
 
 
 class OfferViewSet(viewsets.ModelViewSet):
     queryset = Offer.objects.all()
     serializer_class = OfferSerializer
+    permission_classes = [AllowAny] 
     pagination_class = LargeResultsSetPagination
     filter_backends = [DjangoFilterBackend,
                        filters.SearchFilter, filters.OrderingFilter]    
