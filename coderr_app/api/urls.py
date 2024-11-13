@@ -1,6 +1,6 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import ProfileViewSet, BusinessProfilesView, CustomerProfilesView, OfferViewSet, OrderViewSet, OfferDetailsViewSet, ReviewViewSet
+from .views import ProfileViewSet, BusinessProfilesView, CustomerProfilesView, OfferViewSet, OrderViewSet, OfferDetailsViewSet, ReviewViewSet, OrderCountView, CompletedOrderCountView, BaseInfo
 
 
 router = DefaultRouter()
@@ -13,6 +13,10 @@ urlpatterns = [
     path('', include(router.urls)),
     path('profiles/business/', BusinessProfilesView.as_view(), name='business_profiles'),
     path('profiles/customer/', CustomerProfilesView.as_view(), name='customer_profiles'),
+    # path('order-count/{business_user_id}/', CustomerProfilesView.as_view(), name='customer_profiles'),
+    path('order-count/<int:business_user_id>/', OrderCountView.as_view(), name='order_count'),
+    path('completed-order-count/<int:business_user_id>/', CompletedOrderCountView.as_view(), name='completed_order_count'),
+    path('base-info/', BaseInfo.as_view(), name='base-info'),
 ]
 
 

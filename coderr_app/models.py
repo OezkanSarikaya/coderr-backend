@@ -1,5 +1,6 @@
 from django.db import models
 from django.contrib.auth.models import User
+# from django.core.validators import MinValueValidator
 
 # Create your models here.
 class Review(models.Model):
@@ -56,29 +57,29 @@ class Profile(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
 class Offer(models.Model):
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='offers')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='offers')
     title = models.CharField(max_length=255, blank=True, null=True)
     image = models.FileField(upload_to='offer_images/', blank=True, null=True)
     description = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    min_price = models.DecimalField(max_digits=6, decimal_places=2)
-    min_delivery_time = models.IntegerField(default=10)
+    # min_price = models.DecimalField(max_digits=6, decimal_places=2)
+    # min_delivery_time = models.IntegerField(default=10)
 
-    @property
-    def details(self):
-        return self.offerdetail_set.all()
+    # @property
+    # def details(self):
+    #     return self.offerdetail_set.all()
     
-    @property
-    def user_details(self):
-        return {
-            "first_name": self.user.first_name,
-            "last_name": self.user.last_name,
-            "username": self.user.username,
-        }
+    # @property
+    # def user_details(self):
+    #     return {
+    #         "first_name": self.user.first_name,
+    #         "last_name": self.user.last_name,
+    #         "username": self.user.username,
+    #     }
     
-    def __str__(self):
-        return self.title
+    # def __str__(self):
+    #     return self.title
 
 class OfferDetail(models.Model):
     OFFER_TYPE_CHOICES = [
@@ -89,8 +90,8 @@ class OfferDetail(models.Model):
     
     offer = models.ForeignKey(Offer, on_delete=models.CASCADE, related_name='details', null=True)
     title = models.CharField(max_length=255)
-    revisions = models.IntegerField()
-    delivery_time_in_days = models.PositiveIntegerField()
+    revisions = models.IntegerField(default=-1)
+    delivery_time_in_days = models.PositiveIntegerField()  # Nur positive Integer
     price = models.DecimalField(max_digits=10, decimal_places=2)
     features = models.JSONField()  # Speichert eine Liste von Features als JSON
     offer_type = models.CharField(max_length=10, choices=OFFER_TYPE_CHOICES)
