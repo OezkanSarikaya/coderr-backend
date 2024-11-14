@@ -6,9 +6,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework import status
 from rest_framework.views import APIView
-# from rest_framework.exceptions import NotFound
 from django.contrib.auth.models import User
-# from rest_framework.decorators import action
 from django.shortcuts import get_object_or_404
 from rest_framework.pagination import PageNumberPagination
 from django_filters.rest_framework import DjangoFilterBackend
@@ -85,11 +83,9 @@ class OfferDetailsViewSet(viewsets.ModelViewSet):
     queryset = OfferDetail.objects.all()
     serializer_class = OfferDetailSerializer
 
-
 class OrderViewSet(viewsets.ModelViewSet):
     queryset = Order.objects.all()
-    serializer_class = OrderSerializer
-    
+    serializer_class = OrderSerializer   
 
 
 class OfferViewSet(viewsets.ModelViewSet):
@@ -99,11 +95,6 @@ class OfferViewSet(viewsets.ModelViewSet):
     pagination_class = LargeResultsSetPagination
     filter_backends = [DjangoFilterBackend,
                        filters.SearchFilter, filters.OrderingFilter]    
-    # filterset_fields = {
-    #     'user': ['exact'],  # Filter für den 'creator_id' (user ID des Erstellers)
-    #     'details__price': ['gte'],  # Mindestpreis für die OfferDetails (min_price)
-    #     'details__delivery_time_in_days': ['lte'],  # Maximale Lieferzeit (max_delivery_time)
-    # }
     ordering_fields = ['updated_at','details__price']
     search_fields = ['title', 'description']    
 
