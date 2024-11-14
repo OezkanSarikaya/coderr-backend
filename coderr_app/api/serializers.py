@@ -40,7 +40,40 @@ class OfferDetailSerializer(serializers.ModelSerializer):
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ['first_name', 'last_name', 'username' ]
+        fields = ['pk', 'first_name', 'last_name', 'username' ]
+
+class ProfileTypeSerializer(serializers.ModelSerializer):
+    user = UserSerializer()  # Hier verschachtelter User-Serializer
+    file = serializers.FileField(required=False)
+
+    class Meta:
+        model = Profile
+        fields = [
+            'user',           # Benutzerinformationen als verschachteltes Objekt
+            'file',
+            'location',
+            'tel',
+            'description',
+            'working_hours',
+            'type',
+            'email',
+            'created_at'
+        ]
+        extra_kwargs = {
+            'file': {'required': False}
+        }
+
+    def to_representation(self, instance):
+        representation = super().to_representation(instance)
+
+        # Füge den relativen Pfad für das `file`-Feld hinzu, falls vorhanden
+        if instance.file:
+            representation['file'] = f"{settings.MEDIA_URL}{instance.file}"
+
+        return representation
+    
+
+
 class OfferSerializer(serializers.ModelSerializer):
     details = OfferDetailSerializer(many=True)
     # details = OfferDetailLinkSerializer(many=True, read_only=True)
@@ -105,11 +138,11 @@ class OfferSerializer(serializers.ModelSerializer):
 
 
 class ProfileSerializer(serializers.ModelSerializer):
-    user = serializers.PrimaryKeyRelatedField(
-        queryset=User.objects.all())  # ID des Users
+    user = serializers.PrimaryKeyRelatedField(queryset=User.objects.all())  # ID des Users
+    
+    # user = UserSerializer() 
     username = serializers.CharField(source="user.username", read_only=True)
-    first_name = serializers.CharField(
-        source="user.first_name", read_only=True)
+    first_name = serializers.CharField(source="user.first_name", read_only=True)
     last_name = serializers.CharField(source="user.last_name", read_only=True)
     file = serializers.FileField(required=False)
 

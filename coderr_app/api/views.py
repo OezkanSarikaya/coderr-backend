@@ -1,7 +1,7 @@
 
 from rest_framework import viewsets, filters, generics, permissions
 from coderr_app.models import Profile, Offer, Order, OfferDetail, Review
-from .serializers import ProfileSerializer, UserSerializer, OfferSerializer, OrderSerializer, OfferDetailSerializer, ReviewSerializer
+from .serializers import ProfileSerializer, UserSerializer, OfferSerializer, OrderSerializer, OfferDetailSerializer, ReviewSerializer, ProfileTypeSerializer
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework import status
@@ -179,7 +179,7 @@ class BusinessProfilesView(APIView):
 
     def get(self, request, *args, **kwargs):
         business_profiles = Profile.objects.filter(type="business")
-        serializer = ProfileSerializer(business_profiles, many=True)
+        serializer = ProfileTypeSerializer(business_profiles, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
@@ -188,5 +188,5 @@ class CustomerProfilesView(APIView):
 
     def get(self, request, *args, **kwargs):
         customer_profiles = Profile.objects.filter(type="customer")
-        serializer = ProfileSerializer(customer_profiles, many=True)
+        serializer = ProfileTypeSerializer(customer_profiles, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
