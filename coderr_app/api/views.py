@@ -1,7 +1,7 @@
 
 from rest_framework import viewsets, filters, generics, permissions
 from coderr_app.models import Profile, Offer, Order, OfferDetail, Review
-from .serializers import ProfileSerializer, UserSerializer, OfferSerializer, OrderSerializer, OfferDetailSerializer, ReviewSerializer, ProfileTypeSerializer
+from .serializers import ProfileSerializer, UserSerializer, OfferSerializer, OrderSerializer, OfferDetailSerializer, ReviewSerializer, BusinessSerializer, CustomerSerializer
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework import status
@@ -15,23 +15,32 @@ from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.permissions import AllowAny
 from django.db.models import Min, Max
 from .permissions import IsBusinessUserOrReadOnly, OrderPermissions
+from decimal import Decimal
 
 class BaseInfo(APIView):
     permission_classes = [AllowAny] 
+    
     def get(self, *args, **kwargs):
-        # Filter für laufende Bestellungen (`in_progress`)
+        # Anzahl der Bewertungen
         review_count = Review.objects.count()
-        average_rating = Review.objects.aggregate(Avg("rating", default=0))
-        average_rating = average_rating.get("average_rating") or 0.0
+        
+        # Durchschnittliche Bewertung berechnen und auf eine Dezimalstelle runden
+        average_rating_data = Review.objects.aggregate(average_rating=Avg("rating"))
+        average_rating = average_rating_data.get("average_rating") or 0.0
+        average_rating = round(Decimal(average_rating), 1)  # Runde auf eine Dezimalstelle
+        
+        # Anzahl der Business-Profile
         business_profile_count = Profile.objects.filter(type="business").count()
+        
+        # Anzahl der Angebote
         offer_count = Offer.objects.count()
         
-        
+        # Daten sammeln
         data = {
-        "review_count": review_count,
-        "average_rating": average_rating,
-        "business_profile_count": business_profile_count,
-        "offer_count": offer_count,
+            "review_count": review_count,
+            "average_rating": average_rating,
+            "business_profile_count": business_profile_count,
+            "offer_count": offer_count,
         }
         
         return Response(data, status=status.HTTP_200_OK)
@@ -194,22 +203,30 @@ class BusinessProfilesView(APIView):
         if pk:  # Wenn eine Profil-ID übergeben wurde, Detailansicht anzeigen
             try:
                 profile = Profile.objects.get(user__pk=pk, type="business")
-                serializer = ProfileTypeSerializer(profile)
+                serializer = BusinessSerializer(profile)
                 return Response(serializer.data, status=status.HTTP_200_OK)
             except Profile.DoesNotExist:
                 return Response({"error": "Profile not found"}, status=status.HTTP_404_NOT_FOUND)
         
         # Andernfalls alle Business-Profile auflisten
         business_profiles = Profile.objects.filter(type="business")
-        serializer = ProfileTypeSerializer(business_profiles, many=True)
+        serializer = BusinessSerializer(business_profiles, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 
 class CustomerProfilesView(APIView):
-    # permission_classes = [IsAuthenticated]
-
-    def get(self, request, *args, **kwargs):
-        customer_profiles = Profile.objects.filter(type="customer")
-        serializer = ProfileTypeSerializer(customer_profiles, many=True)
+    def get(self, request, pk=None, *args, **kwargs):
+        if pk:  # Wenn eine Profil-ID übergeben wurde, Detailansicht anzeigen
+            try:
+                profile = Profile.objects.get(user__pk=pk, type="customer")
+                serializer = CustomerSerializer(profile)
+                return Response(serializer.data, status=status.HTTP_200_OK)
+            except Profile.DoesNotExist:
+                return Response({"error": "Profile not found"}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Andernfalls alle Business-Profile auflisten
+        business_profiles = Profile.objects.filter(type="customer")
+        serializer = CustomerSerializer(business_profiles, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+

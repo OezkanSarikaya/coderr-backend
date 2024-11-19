@@ -112,7 +112,38 @@ class UserSerializer(serializers.ModelSerializer):
         fields = ['pk', 'first_name', 'last_name', 'username']
 
 
-class ProfileTypeSerializer(serializers.ModelSerializer):
+class BusinessSerializer(serializers.ModelSerializer):
+    user = UserSerializer()  # Hier verschachtelter User-Serializer
+    file = serializers.FileField(required=False)
+
+    class Meta:
+        model = Profile
+        fields = [
+            'user',           # Benutzerinformationen als verschachteltes Objekt
+            'file',
+            'location',
+            'tel',
+            'description',
+            'working_hours',
+            # 'created_at',
+            'type',
+            # 'email',
+            # 'created_at'
+        ]
+        extra_kwargs = {
+            'file': {'required': False}
+        }
+
+    def to_representation(self, instance):
+        representation = super().to_representation(instance)
+
+        # Füge den relativen Pfad für das `file`-Feld hinzu, falls vorhanden
+        if instance.file:
+            representation['file'] = f"{settings.MEDIA_URL}{instance.file}"
+
+        return representation
+    
+class CustomerSerializer(serializers.ModelSerializer):
     user = UserSerializer()  # Hier verschachtelter User-Serializer
     file = serializers.FileField(required=False)
 
@@ -125,7 +156,7 @@ class ProfileTypeSerializer(serializers.ModelSerializer):
             # 'tel',
             # 'description',
             # 'working_hours',
-            'uploaded_at',
+            'created_at',
             'type',
             # 'email',
             # 'created_at'
