@@ -22,7 +22,6 @@ class Order(models.Model):
         ('completed', 'Abgeschlossen'),
         ('cancelled', 'Abgebrochen'),
     ]
-
     customer_user = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name='customer_orders')
     business_user = models.ForeignKey(
@@ -64,8 +63,7 @@ class Profile(models.Model):
 
 
 class Offer(models.Model):
-    user = models.ForeignKey(
-        User, on_delete=models.CASCADE, related_name='offers')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='offers')
     title = models.CharField(max_length=255, blank=True, null=True)
     image = models.FileField(upload_to='offer_images/', blank=True, null=True)
     description = models.TextField(blank=True, null=True)
@@ -93,4 +91,4 @@ class OfferDetail(models.Model):
     offer_type = models.CharField(max_length=10, choices=OFFER_TYPE_CHOICES)
 
     def __str__(self):
-        return f"{self.title} ({self.offer_type}) - {self.price}€"
+        return f"{self.id} {self.title} ({self.offer_type}) - {self.price}€"

@@ -29,15 +29,62 @@ class ReviewSerializer(serializers.ModelSerializer):
 
 
 class OrderSerializer(serializers.ModelSerializer):
+    offer_detail_id = serializers.IntegerField(write_only=True, required=True)  # Write-only Feld
+
     class Meta:
         model = Order
-        fields = '__all__'
+        # fields = '__all__'
+        # fields = ['id', 'customer_user', 'business_user', 'title', 'revisions', 'delivery_time_in_days', 'price', 'features', 'offer_type', 'status',
+        #           'created_at', 'updated_at']
+        fields = [
+            'id', 'customer_user', 'business_user', 'title', 'revisions', 
+            'delivery_time_in_days', 'price', 'features', 'offer_type', 
+            'status', 'created_at', 'updated_at', 'offer_detail_id'
+        ]
+        read_only_fields = ['customer_user', 'business_user', 'title', 
+                            'revisions', 'delivery_time_in_days', 'price', 
+                            'features', 'offer_type']
+        
+    def validate_offer_detail_id(self, value):
+        # Überprüfen, ob das OfferDetail existiert
+        try:
+            offer_detail = OfferDetail.objects.get(id=value)
+        except OfferDetail.DoesNotExist:
+            raise serializers.ValidationError("Invalid offer_detail_id.")
+        return value
+
+    def create(self, validated_data):
+        # Hole den angemeldeten Benutzer aus dem Kontext
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            raise serializers.ValidationError("User must be authenticated.")
+
+        customer_user = request.user
+        offer_detail_id = validated_data.pop('offer_detail_id')
+
+        # Hole das OfferDetail
+        offer_detail = OfferDetail.objects.get(id=offer_detail_id)
+
+        # Erstelle die Order basierend auf OfferDetail
+        order = Order.objects.create(
+            customer_user=customer_user,
+            business_user=offer_detail.offer.user,
+            title=offer_detail.title,
+            revisions=offer_detail.revisions,
+            delivery_time_in_days=offer_detail.delivery_time_in_days,
+            price=offer_detail.price,
+            features=offer_detail.features,
+            offer_type=offer_detail.offer_type,
+            **validated_data
+        )
+
+        return order
 
 
 class OfferDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = OfferDetail
-        fields = ['title', 'revisions', 'delivery_time_in_days',
+        fields = ['id', 'title', 'revisions', 'delivery_time_in_days',
                   'price', 'features', 'offer_type']
 
     def validate(self, data):
@@ -74,13 +121,14 @@ class ProfileTypeSerializer(serializers.ModelSerializer):
         fields = [
             'user',           # Benutzerinformationen als verschachteltes Objekt
             'file',
-            'location',
-            'tel',
-            'description',
-            'working_hours',
+            # 'location',
+            # 'tel',
+            # 'description',
+            # 'working_hours',
+            'uploaded_at',
             'type',
-            'email',
-            'created_at'
+            # 'email',
+            # 'created_at'
         ]
         extra_kwargs = {
             'file': {'required': False}
@@ -199,6 +247,9 @@ class OfferSerializer(serializers.ModelSerializer):
             'id', 'user', 'title', 'image', 'description', 'created_at', 'updated_at',
             'details', 'min_price', 'min_delivery_time', 'user_details'
         ]
+        extra_kwargs = {
+            'user': {'read_only': True}  # Macht das 'user'-Feld nur lesbar
+        }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -223,7 +274,16 @@ class OfferSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         # Extrahiert `details_data` und erstellt das Offer mit den zugehörigen OfferDetail-Objekten
         details_data = validated_data.pop('details', [])
-        offer = Offer.objects.create(**validated_data)
+          # Hole den angemeldeten Benutzer aus dem Kontext
+        user = self.context['request'].user if self.context['request'] else None
+
+        # Überprüfe, ob ein Benutzer authentifiziert ist
+        if not user or not user.is_authenticated:
+            raise serializers.ValidationError("Der Benutzer muss angemeldet sein, um ein Angebot zu erstellen.")
+
+        
+        # user = user.user.pk
+        offer = Offer.objects.create(user=user, **validated_data)
 
         # Erstellt die OfferDetail-Objekte und verknüpft sie mit dem Offer
         for detail_data in details_data:

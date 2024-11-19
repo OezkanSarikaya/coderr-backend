@@ -13,6 +13,8 @@ from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Avg
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.permissions import AllowAny
+from django.db.models import Min, Max
+from .permissions import IsBusinessUserOrReadOnly, OrderPermissions
 
 class BaseInfo(APIView):
     permission_classes = [AllowAny] 
@@ -82,20 +84,36 @@ class ReviewViewSet(viewsets.ModelViewSet):
 class OfferDetailsViewSet(viewsets.ModelViewSet):
     queryset = OfferDetail.objects.all()
     serializer_class = OfferDetailSerializer
+    # permission_classes = [IsAuthenticated, IsBusinessUserOrReadOnly] 
+    permission_classes = [AllowAny] 
 
 class OrderViewSet(viewsets.ModelViewSet):
     queryset = Order.objects.all()
     serializer_class = OrderSerializer   
+    permission_classes = [OrderPermissions] 
+
+    def get_queryset(self):
+        # Filtert Bestellungen, bei denen der Benutzer beteiligt ist
+        user = self.request.user
+        queryset = Order.objects.filter(customer_user=user) | Order.objects.filter(business_user=user)
+
+        # Füge eine Standard-Sortierung hinzu
+        return queryset.order_by('-created_at')
+
+    # def get_serializer_context(self):
+    #     context = super().get_serializer_context()
+    #     context['request'] = self.request
+    #     return context
 
 
 class OfferViewSet(viewsets.ModelViewSet):
     queryset = Offer.objects.all()
     serializer_class = OfferSerializer
-    permission_classes = [AllowAny] 
+    permission_classes = [IsBusinessUserOrReadOnly] 
     pagination_class = LargeResultsSetPagination
     filter_backends = [DjangoFilterBackend,
                        filters.SearchFilter, filters.OrderingFilter]    
-    ordering_fields = ['updated_at','details__price']
+    ordering_fields = ['updated_at','min_price']
     search_fields = ['title', 'description']    
 
     def get_queryset(self):
@@ -106,15 +124,21 @@ class OfferViewSet(viewsets.ModelViewSet):
         if creator_id:
             queryset = queryset.filter(user_id=creator_id)
 
-        # Filtern nach Mindestpreis in OfferDetails
+       # Annotiere Mindestpreis und maximale Lieferzeit von OfferDetails
+        queryset = queryset.annotate(
+            min_price=Min('details__price'),  # Minimaler Preis aus OfferDetail
+            max_delivery_time=Max('details__delivery_time_in_days')  # Maximale Lieferzeit aus OfferDetail
+        )
+
+        # Filtern nach Mindestpreis
         min_price = self.request.query_params.get('min_price')
         if min_price:
-            queryset = queryset.filter(details__price__gte=min_price)
+            queryset = queryset.filter(min_price__gte=min_price)
 
-        # Filtern nach maximaler Lieferzeit in OfferDetails
+        # Filtern nach maximaler Lieferzeit
         max_delivery_time = self.request.query_params.get('max_delivery_time')
         if max_delivery_time:
-            queryset = queryset.filter(details__delivery_time_in_days__lte=max_delivery_time)
+            queryset = queryset.filter(max_delivery_time__lte=max_delivery_time)
 
         return queryset
 
@@ -166,12 +190,20 @@ class ProfileViewSet(viewsets.ModelViewSet):
 
 
 class BusinessProfilesView(APIView):
-    # permission_classes = [IsAuthenticated]  # Nur authentifizierte Benutzer können die Liste sehen
-
-    def get(self, request, *args, **kwargs):
+    def get(self, request, pk=None, *args, **kwargs):
+        if pk:  # Wenn eine Profil-ID übergeben wurde, Detailansicht anzeigen
+            try:
+                profile = Profile.objects.get(user__pk=pk, type="business")
+                serializer = ProfileTypeSerializer(profile)
+                return Response(serializer.data, status=status.HTTP_200_OK)
+            except Profile.DoesNotExist:
+                return Response({"error": "Profile not found"}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Andernfalls alle Business-Profile auflisten
         business_profiles = Profile.objects.filter(type="business")
         serializer = ProfileTypeSerializer(business_profiles, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
 
 
 class CustomerProfilesView(APIView):
