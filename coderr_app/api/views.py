@@ -11,30 +11,36 @@ from django.shortcuts import get_object_or_404
 from rest_framework.pagination import PageNumberPagination
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Avg
-from rest_framework.exceptions import AuthenticationFailed
+from rest_framework.exceptions import AuthenticationFailed, PermissionDenied, ValidationError
 from rest_framework.permissions import AllowAny
 from django.db.models import Min, Max
-from .permissions import IsBusinessUserOrReadOnly, OrderPermissions
+from .permissions import IsBusinessUserOrReadOnly, OrderPermissions, IsReviewerOrAdmin
 from decimal import Decimal
 
+from coderr_app.api import serializers
+
+
 class BaseInfo(APIView):
-    permission_classes = [AllowAny] 
-    
+    permission_classes = [AllowAny]
+
     def get(self, *args, **kwargs):
         # Anzahl der Bewertungen
         review_count = Review.objects.count()
-        
+
         # Durchschnittliche Bewertung berechnen und auf eine Dezimalstelle runden
-        average_rating_data = Review.objects.aggregate(average_rating=Avg("rating"))
+        average_rating_data = Review.objects.aggregate(
+            average_rating=Avg("rating"))
         average_rating = average_rating_data.get("average_rating") or 0.0
-        average_rating = round(Decimal(average_rating), 1)  # Runde auf eine Dezimalstelle
-        
+        # Runde auf eine Dezimalstelle
+        average_rating = round(Decimal(average_rating), 1)
+
         # Anzahl der Business-Profile
-        business_profile_count = Profile.objects.filter(type="business").count()
-        
+        business_profile_count = Profile.objects.filter(
+            type="business").count()
+
         # Anzahl der Angebote
         offer_count = Offer.objects.count()
-        
+
         # Daten sammeln
         data = {
             "review_count": review_count,
@@ -42,29 +48,33 @@ class BaseInfo(APIView):
             "business_profile_count": business_profile_count,
             "offer_count": offer_count,
         }
-        
+
         return Response(data, status=status.HTTP_200_OK)
+
 
 class OrderCountView(APIView):
     def get(self, request, business_user_id):
         # Filter für laufende Bestellungen (`in_progress`)
-        order_count = Order.objects.filter(business_user_id=business_user_id, status="in_progress").count()
-        
-        if order_count == 0 and not Order.objects.filter(business_user_id=business_user_id).exists():
+        order_count = Order.objects.filter(
+            business_user_id=business_user_id, status="in_progress").count()
+
+        if not Profile.objects.filter(user=business_user_id).exists():
             return Response({"error": "Business user not found."}, status=status.HTTP_404_NOT_FOUND)
-        
+
         return Response({"order_count": order_count}, status=status.HTTP_200_OK)
 
 
 class CompletedOrderCountView(APIView):
     def get(self, request, business_user_id):
         # Filter für abgeschlossene Bestellungen (`completed`)
-        completed_order_count = Order.objects.filter(business_user_id=business_user_id, status="completed").count()
-        
-        if completed_order_count == 0 and not Order.objects.filter(business_user_id=business_user_id).exists():
+        completed_order_count = Order.objects.filter(
+            business_user_id=business_user_id, status="completed").count()
+
+        if not Profile.objects.filter(user=business_user_id).exists():
             return Response({"error": "Business user not found."}, status=status.HTTP_404_NOT_FOUND)
-        
+
         return Response({"completed_order_count": completed_order_count}, status=status.HTTP_200_OK)
+
 
 class LargeResultsSetPagination(PageNumberPagination):
     page_size = 5  # Standard Anzahl pro Seite
@@ -75,59 +85,81 @@ class LargeResultsSetPagination(PageNumberPagination):
 class ReviewViewSet(viewsets.ModelViewSet):
     queryset = Review.objects.all()
     serializer_class = ReviewSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly] 
+    permission_classes = [IsAuthenticatedOrReadOnly, IsReviewerOrAdmin]
     filter_backends = [DjangoFilterBackend,
-                       filters.SearchFilter, filters.OrderingFilter]   
+                       filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['business_user_id', 'reviewer_id']
-    ordering_fields = ['updated_at','rating']
+    ordering_fields = ['updated_at', 'rating']
 
     def perform_create(self, serializer):
+        user = self.request.user
+
         # Überprüfen, ob der Benutzer authentifiziert ist
-        if not self.request.user.is_authenticated:
-            raise AuthenticationFailed("You must be logged in to create a review.")
-        
-        # Falls der Benutzer authentifiziert ist, setze den reviewer auf self.request.user
-        serializer.save(reviewer=self.request.user)
+        if not user.is_authenticated:
+            raise AuthenticationFailed(
+                "You must be logged in to create a review.")
+
+        # Überprüfen, ob der Benutzer ein Kundenprofil hat
+        if not hasattr(user, 'profile') or user.profile.type != 'customer':
+            raise PermissionDenied(
+                "Only users with a customer profile can create reviews.")
+
+        # `business_user` aus den Daten extrahieren
+        business_user_id = self.request.data.get('business_user')
+
+        if not business_user_id:
+            raise serializers.ValidationError(
+                {"business_user": "This field is required."})
+
+        try:
+            business_user = User.objects.get(id=business_user_id)
+        except User.DoesNotExist:
+            raise serializers.ValidationError(
+                {"business_user": "Invalid business_user ID."})
+
+        # Sicherstellen, dass der Zielnutzer ein Geschäftsprofil hat
+        if not hasattr(business_user, 'profile') or business_user.profile.type != 'business':
+            raise serializers.ValidationError(
+                {"business_user": "The target user must have a business profile."})
+
+        # Speichern der Review mit den korrekten Feldern
+        serializer.save(reviewer=user, business_user=business_user)
 
 
 class OfferDetailsViewSet(viewsets.ModelViewSet):
     queryset = OfferDetail.objects.all()
     serializer_class = OfferDetailSerializer
-    # permission_classes = [IsAuthenticated, IsBusinessUserOrReadOnly] 
-    permission_classes = [AllowAny] 
+    # permission_classes = [IsAuthenticated, IsBusinessUserOrReadOnly]
+    permission_classes = [AllowAny]
+
 
 class OrderViewSet(viewsets.ModelViewSet):
     queryset = Order.objects.all()
-    serializer_class = OrderSerializer   
-    permission_classes = [OrderPermissions] 
+    serializer_class = OrderSerializer
+    permission_classes = [IsAuthenticated]  # Nur authentifizierte Benutzer
+    pagination_class = None  # Optional, wenn keine Paginierung benötigt wird
 
     def get_queryset(self):
         # Filtert Bestellungen, bei denen der Benutzer beteiligt ist
         user = self.request.user
-        queryset = Order.objects.filter(customer_user=user) | Order.objects.filter(business_user=user)
-
-        # Füge eine Standard-Sortierung hinzu
+        queryset = Order.objects.filter(
+            customer_user=user) | Order.objects.filter(business_user=user)
         return queryset.order_by('-created_at')
-
-    # def get_serializer_context(self):
-    #     context = super().get_serializer_context()
-    #     context['request'] = self.request
-    #     return context
 
 
 class OfferViewSet(viewsets.ModelViewSet):
     queryset = Offer.objects.all()
     serializer_class = OfferSerializer
-    permission_classes = [IsBusinessUserOrReadOnly] 
+    permission_classes = [IsBusinessUserOrReadOnly]
     pagination_class = LargeResultsSetPagination
     filter_backends = [DjangoFilterBackend,
-                       filters.SearchFilter, filters.OrderingFilter]    
-    ordering_fields = ['updated_at','min_price']
-    search_fields = ['title', 'description']    
+                       filters.SearchFilter, filters.OrderingFilter]
+    ordering_fields = ['updated_at', 'min_price']
+    search_fields = ['title', 'description']
 
     def get_queryset(self):
         queryset = super().get_queryset()
-        
+
         # Filtieren nach creator_id (Benutzer, der das Angebot erstellt hat)
         creator_id = self.request.query_params.get('creator_id')
         if creator_id:
@@ -136,7 +168,8 @@ class OfferViewSet(viewsets.ModelViewSet):
        # Annotiere Mindestpreis und maximale Lieferzeit von OfferDetails
         queryset = queryset.annotate(
             min_price=Min('details__price'),  # Minimaler Preis aus OfferDetail
-            max_delivery_time=Max('details__delivery_time_in_days')  # Maximale Lieferzeit aus OfferDetail
+            # Maximale Lieferzeit aus OfferDetail
+            max_delivery_time=Max('details__delivery_time_in_days')
         )
 
         # Filtern nach Mindestpreis
@@ -147,9 +180,25 @@ class OfferViewSet(viewsets.ModelViewSet):
         # Filtern nach maximaler Lieferzeit
         max_delivery_time = self.request.query_params.get('max_delivery_time')
         if max_delivery_time:
-            queryset = queryset.filter(max_delivery_time__lte=max_delivery_time)
+            queryset = queryset.filter(
+                max_delivery_time__lte=max_delivery_time)
 
         return queryset
+
+    def list(self, request, *args, **kwargs):
+        # Überprüfen, ob ein Suchbegriff vorhanden ist
+        search_query = request.query_params.get('search', '').strip()
+        page_param = request.query_params.get('page', '').strip()
+
+        # Wenn ein Suchbegriff vorhanden ist und `page` angegeben ist
+        if search_query and page_param:
+            # Überschreiben des `page`-Parameters, um Fehler zu vermeiden
+            request.query_params._mutable = True  # QueryDict auf "änderbar" setzen
+            request.query_params.pop('page', None)  # Entfernen Sie `page`
+            request.query_params._mutable = False  # Zurück auf unveränderlich setzen
+
+        # Aufruf der Standard-Logik
+        return super().list(request, *args, **kwargs)
 
 
 class ProfileViewSet(viewsets.ModelViewSet):
@@ -197,7 +246,6 @@ class ProfileViewSet(viewsets.ModelViewSet):
             return Response({'error': 'Profile not found'}, status=404)
 
 
-
 class BusinessProfilesView(APIView):
     def get(self, request, pk=None, *args, **kwargs):
         if pk:  # Wenn eine Profil-ID übergeben wurde, Detailansicht anzeigen
@@ -207,12 +255,11 @@ class BusinessProfilesView(APIView):
                 return Response(serializer.data, status=status.HTTP_200_OK)
             except Profile.DoesNotExist:
                 return Response({"error": "Profile not found"}, status=status.HTTP_404_NOT_FOUND)
-        
+
         # Andernfalls alle Business-Profile auflisten
         business_profiles = Profile.objects.filter(type="business")
         serializer = BusinessSerializer(business_profiles, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
-
 
 
 class CustomerProfilesView(APIView):
@@ -224,9 +271,8 @@ class CustomerProfilesView(APIView):
                 return Response(serializer.data, status=status.HTTP_200_OK)
             except Profile.DoesNotExist:
                 return Response({"error": "Profile not found"}, status=status.HTTP_404_NOT_FOUND)
-        
+
         # Andernfalls alle Business-Profile auflisten
         business_profiles = Profile.objects.filter(type="customer")
         serializer = CustomerSerializer(business_profiles, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
-

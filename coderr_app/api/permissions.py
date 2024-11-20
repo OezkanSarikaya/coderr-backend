@@ -37,6 +37,10 @@ class OrderPermissions(BasePermission):
         # DELETE ist nur für Admin-Benutzer erlaubt
         if request.method == 'DELETE':
             return request.user.is_staff
+        
+        # POST ist nur für Business-User erlaubt
+        if request.method == 'POST':
+            return request.user.is_authenticated and hasattr(request.user, 'profile') and request.user.profile.type == 'business'
 
         # PATCH und andere Methoden werden in has_object_permission behandelt
         return request.user.is_authenticated
@@ -49,7 +53,8 @@ class OrderPermissions(BasePermission):
                 new_status = request.data.get('status')
                 allowed_status_transitions = ["completed", "cancelled"]
                 return obj.status == "in_progress" and new_status in allowed_status_transitions
-            return False
+            return False       
+        
 
         # DELETE: Nur Admin-Benutzer (überprüft bereits in has_permission)
         if request.method == 'DELETE':
@@ -57,3 +62,19 @@ class OrderPermissions(BasePermission):
 
         # Standardmäßig erlauben, falls keine spezifische Regel greift
         return True
+    
+
+
+class IsReviewerOrAdmin(BasePermission):
+    """
+    Erlaubt Änderungen und Löschungen nur dem Ersteller (Reviewer) oder Admins.
+    """
+
+    def has_object_permission(self, request, view, obj):
+        # Lesen ist für alle erlaubt
+        if request.method in SAFE_METHODS:
+            return True
+
+        # Überprüfen, ob der Benutzer der Ersteller der Bewertung oder ein Admin ist
+        return request.user == obj.reviewer or request.user.is_staff
+
