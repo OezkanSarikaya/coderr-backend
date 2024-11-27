@@ -1,10 +1,13 @@
+from rest_framework.permissions import BasePermission
 from rest_framework.permissions import BasePermission, SAFE_METHODS
+
 
 class IsBusinessUserOrReadOnly(BasePermission):
     """
     Erlaubt GET und andere "sichere" Methoden für alle Benutzer.
     POST und andere schreibende Methoden sind nur für 'business'-Benutzer erlaubt.
     """
+
     def has_permission(self, request, view):
         # Erlaube "sichere" Methoden (GET, HEAD, OPTIONS) für alle Benutzer
         if request.method in SAFE_METHODS:
@@ -14,12 +17,9 @@ class IsBusinessUserOrReadOnly(BasePermission):
         if not request.user or not request.user.is_authenticated:
             return False
 
-        # Überprüfen, ob der Benutzer vom Typ 'business' ist        
+        # Überprüfen, ob der Benutzer vom Typ 'business' ist
         return getattr(request.user.profile, 'type', None) == 'business'
-    
-from rest_framework.permissions import BasePermission, SAFE_METHODS
 
-from rest_framework.permissions import BasePermission
 
 class OrderPermissions(BasePermission):
     """
@@ -37,7 +37,7 @@ class OrderPermissions(BasePermission):
         # DELETE ist nur für Admin-Benutzer erlaubt
         if request.method == 'DELETE':
             return request.user.is_staff
-        
+
         # POST ist nur für Business-User erlaubt
         if request.method == 'POST':
             return request.user.is_authenticated and hasattr(request.user, 'profile') and request.user.profile.type == 'business'
@@ -53,8 +53,7 @@ class OrderPermissions(BasePermission):
                 new_status = request.data.get('status')
                 allowed_status_transitions = ["completed", "cancelled"]
                 return obj.status == "in_progress" and new_status in allowed_status_transitions
-            return False       
-        
+            return False
 
         # DELETE: Nur Admin-Benutzer (überprüft bereits in has_permission)
         if request.method == 'DELETE':
@@ -62,7 +61,6 @@ class OrderPermissions(BasePermission):
 
         # Standardmäßig erlauben, falls keine spezifische Regel greift
         return True
-    
 
 
 class IsReviewerOrAdmin(BasePermission):
@@ -77,4 +75,3 @@ class IsReviewerOrAdmin(BasePermission):
 
         # Überprüfen, ob der Benutzer der Ersteller der Bewertung oder ein Admin ist
         return request.user == obj.reviewer or request.user.is_staff
-

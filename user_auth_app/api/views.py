@@ -3,27 +3,29 @@ from rest_framework.authtoken.models import Token
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny
-from rest_framework import status 
+from rest_framework import status
 from coderr_app.models import Profile
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
 
+
 def get_guest_user():
     guest_username = "guest@domain.com"
-    
+
     # Gastbenutzer abrufen oder erstellen
     guest_user, created = User.objects.get_or_create(
         username=guest_username,
-        defaults={'is_active': True, 'first_name': 'Guest','email': "guest@domain.com",}
+        defaults={'is_active': True, 'first_name': 'Guest',
+                  'email': "guest@domain.com", }
     )
-    
+
     if created:
         guest_user.set_unusable_password()  # Gast-Benutzer ohne Passwort
         guest_user.save()
 
     # Token für den Gastbenutzer abrufen oder erstellen
     token, _ = Token.objects.get_or_create(user=guest_user)
-    
+
     # Kontakt für den Gastbenutzer abrufen oder erstellen
     Profile.objects.get_or_create(
         user=guest_user,
@@ -33,8 +35,9 @@ def get_guest_user():
             'color': 0  # Beispielwert für Farbe, falls erforderlich
         }
     )
-    
+
     return guest_user, token
+
 
 class RegistrationView(APIView):
     permission_classes = [AllowAny]
@@ -54,11 +57,7 @@ class RegistrationView(APIView):
             }
             return Response(data, status=status.HTTP_200_OK)
         else:
-            # data=serializer.errors
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        # return Response(data)
-        # return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class CustomLoginView(APIView):
@@ -83,16 +82,6 @@ class CustomLoginView(APIView):
         email = request.data.get('email')
         username = request.data.get('username')
         password = request.data.get('password')
-        # serializer = LoginSerializer(data=request.data)
-        # data = {}
-
-        # Überprüfen, ob die E-Mail im System existiert
-        # try:
-        #     user = User.objects.get(email=email)
-        # except User.DoesNotExist:
-        #     return Response({'error': 'Email not registered'}, status=status.HTTP_200_OK)
-
-        # Authentifizierung des Benutzers mit Passwort
         user = authenticate(request, username=username, password=password)
         if user is None:
             return Response({'error': 'Incorrect password'}, status=status.HTTP_400_BAD_REQUEST)

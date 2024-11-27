@@ -4,6 +4,7 @@ from django.contrib.auth.models import User
 from django.conf import settings  # Für Zugriff auf MEDIA_URL
 from django.urls import reverse
 from django.db.models import Min
+from rest_framework.exceptions import ValidationError
 
 
 class OfferDetailLinkSerializer(serializers.ModelSerializer):
@@ -19,15 +20,35 @@ class OfferDetailLinkSerializer(serializers.ModelSerializer):
 
 
 class ReviewSerializer(serializers.ModelSerializer):
-
     reviewer = serializers.ReadOnlyField(source='reviewer.id')
 
     class Meta:
         model = Review
         fields = ['id', 'business_user', 'reviewer', 'rating',
                   'description', 'created_at', 'updated_at']
-        read_only_fields = ['business_user',
-                            'reviewer', 'created_at', 'updated_at']
+        read_only_fields = ['reviewer', 'created_at', 'updated_at']
+
+    def validate(self, data):
+        """
+        Ensure a user can only leave one review per business user.
+        """
+        # Use context to access the authenticated user
+        business_user = data.get('business_user')
+        reviewer = self.context['request'].user
+
+        if Review.objects.filter(business_user=business_user, reviewer=reviewer).exists():
+            raise serializers.ValidationError("You can only leave one review per business user.")
+
+        return data
+
+    def validate_rating(self, value):
+        """
+        Ensure the rating is between 1 and 5.
+        """
+        if not (1 <= value <= 5):
+            raise serializers.ValidationError("Rating must be between 1 and 5.")
+        return value
+
 
 
 class OrderSerializer(serializers.ModelSerializer):
@@ -181,6 +202,7 @@ class OfferSerializer(serializers.ModelSerializer):
             'id', 'user', 'title', 'image', 'description', 'created_at', 'updated_at',
             'details', 'min_price', 'min_delivery_time', 'user_details'
         ]
+
         extra_kwargs = {
             'user': {'read_only': True}  # Macht das 'user'-Feld nur lesbar
         }

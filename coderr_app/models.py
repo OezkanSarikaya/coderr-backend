@@ -1,13 +1,22 @@
 from django.db import models
 from django.contrib.auth.models import User
+from django.core.validators import MinValueValidator, MaxValueValidator
 
 
 class Review(models.Model):
+    """
+    Represents a review given by a customer user (reviewer) for a business user.
+    """
     business_user = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name='reviews_received')
     reviewer = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name='reviews_given')
-    rating = models.PositiveIntegerField()
+    rating = models.PositiveIntegerField(
+          validators=[
+            MinValueValidator(1, message="Bewertung muss mindestens einen Stern haben."),
+            MaxValueValidator(5, message="Bewertung darf 5 Sterne nicht überschreiten!")
+        ],
+    )
     description = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -63,7 +72,8 @@ class Profile(models.Model):
 
 
 class Offer(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='offers')
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='offers')
     title = models.CharField(max_length=255, blank=True, null=True)
     image = models.FileField(upload_to='offer_images/', blank=True, null=True)
     description = models.TextField(blank=True, null=True)

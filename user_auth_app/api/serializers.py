@@ -6,7 +6,9 @@ from coderr_app.models import Profile
 
 class RegistrationSerializer(serializers.ModelSerializer):
     repeated_password = serializers.CharField(write_only=True)
-    type = serializers.ChoiceField(choices=Profile.TYPE_CHOICES, required=False)  # Optionales Feld für den Typ
+    # Optionales Feld für den Typ
+    type = serializers.ChoiceField(
+        choices=Profile.TYPE_CHOICES, required=False)
 
     class Meta:
         model = User
@@ -35,15 +37,17 @@ class RegistrationSerializer(serializers.ModelSerializer):
     def validate_email(self, value):
         # Überprüfung, ob die E-Mail bereits existiert
         if User.objects.filter(email=value).exists():
-            raise serializers.ValidationError("Ein Benutzer mit dieser E-Mail existiert bereits.")
-        
+            raise serializers.ValidationError(
+                "Ein Benutzer mit dieser E-Mail existiert bereits.")
+
         return value
-    
+
     def validate_username(self, value):
         # Überprüfung, ob der Benutzername bereits existiert
         if User.objects.filter(username=value).exists():
-            raise serializers.ValidationError({"username": ["Dieser Benutzername ist bereits vergeben."]})
-        
+            raise serializers.ValidationError(
+                {"username": ["Dieser Benutzername ist bereits vergeben."]})
+
         return value
 
     def save(self):
@@ -57,6 +61,7 @@ class RegistrationSerializer(serializers.ModelSerializer):
 
         # Profil erstellen und verknüpfen
         profile_type = self.validated_data.get('type', 'customer')
-        Profile.objects.create(user=account, email=account.email, type=profile_type)
+        Profile.objects.create(
+            user=account, email=account.email, type=profile_type)
 
         return account
