@@ -1,13 +1,15 @@
 from rest_framework import serializers
 from coderr_app.models import Profile, Offer, Order, OfferDetail, Review
 from django.contrib.auth.models import User
-from django.conf import settings  # Für Zugriff auf MEDIA_URL
+from django.conf import settings  # For access to MEDIA_URL
 from django.urls import reverse
 from django.db.models import Min
-from rest_framework.exceptions import ValidationError
 
 
 class OfferDetailLinkSerializer(serializers.ModelSerializer):
+    """
+    Creates Link for single or list view of each detail
+    """
     url = serializers.SerializerMethodField()
 
     class Meta:
@@ -15,11 +17,14 @@ class OfferDetailLinkSerializer(serializers.ModelSerializer):
         fields = ['id', 'url']
 
     def get_url(self, obj):
-        # Dynamisch den URL-Pfad für jedes OfferDetail-Objekt erstellen
+        # Dynamically create the URL path for each OfferDetail object
         return reverse('offerdetails-detail', args=[obj.id])
 
 
 class ReviewSerializer(serializers.ModelSerializer):
+    """
+    Validates reviews and rating
+    """
     reviewer = serializers.ReadOnlyField(source='reviewer.id')
 
     class Meta:
@@ -37,7 +42,8 @@ class ReviewSerializer(serializers.ModelSerializer):
         reviewer = self.context['request'].user
 
         if Review.objects.filter(business_user=business_user, reviewer=reviewer).exists():
-            raise serializers.ValidationError("You can only leave one review per business user.")
+            raise serializers.ValidationError(
+                "You can only leave one review per business user.")
 
         return data
 
@@ -46,14 +52,18 @@ class ReviewSerializer(serializers.ModelSerializer):
         Ensure the rating is between 1 and 5.
         """
         if not (1 <= value <= 5):
-            raise serializers.ValidationError("Rating must be between 1 and 5.")
+            raise serializers.ValidationError(
+                "Rating must be between 1 and 5.")
         return value
 
 
-
 class OrderSerializer(serializers.ModelSerializer):
+    """
+    Validates orders and check permissions
+    """
     offer_detail_id = serializers.IntegerField(
-        write_only=True, required=True)  # Write-only Feld
+        write_only=True, required=False  # `offer_detail_id` only needed for create
+    )
 
     class Meta:
         model = Order
@@ -62,31 +72,48 @@ class OrderSerializer(serializers.ModelSerializer):
             'delivery_time_in_days', 'price', 'features', 'offer_type',
             'status', 'created_at', 'updated_at', 'offer_detail_id'
         ]
-        read_only_fields = ['customer_user', 'business_user', 'title',
-                            'revisions', 'delivery_time_in_days', 'price',
-                            'features', 'offer_type', 'status']
+        read_only_fields = [
+            'customer_user', 'business_user', 'title', 'revisions',
+            'delivery_time_in_days', 'price', 'features', 'offer_type'
+        ]
 
     def validate(self, attrs):
-        # Benutzer muss authentifiziert sein und ein Business-Profil haben
+        """
+        Validates user permissions based on the request type (create or update).
+        """
         request = self.context.get('request')
         if not request or not request.user.is_authenticated:
-            raise serializers.ValidationError(
-                "Der Benutzer muss angemeldet sein.")
-        if not hasattr(request.user, 'profile') or request.user.profile.type == 'business':
-            raise serializers.ValidationError(
-                "Nur Benutzer mit einem Business-Profil können Bestellungen erstellen.")
+            raise serializers.ValidationError("Der Benutzer muss angemeldet sein.")
+
+        # Only `customer_user` are allowed to create an order
+        if request.method == 'POST':
+            if not hasattr(request.user, 'profile') or request.user.profile.type != 'customer':
+                raise serializers.ValidationError(
+                    "Nur Benutzer mit Kundenprofil können Bestellungen erstellen."
+                )
+
+        # Only `business_user` are allowed to update an order
+        if request.method in ['PUT', 'PATCH']:
+            order = self.instance
+            if not (request.user == order.business_user):
+                raise serializers.ValidationError(
+                    "Sie haben keine Berechtigung diese Bestellung zu bearbeiten"
+                )
+
         return attrs
 
     def create(self, validated_data):
-        # Hole den angemeldeten Benutzer aus dem Kontext
+        """
+        Create a new order, only allowed for customer users.
+        """
         request = self.context.get('request')
         customer_user = request.user
-        offer_detail_id = validated_data.pop('offer_detail_id')
+        offer_detail_id = validated_data.pop('offer_detail_id', None)
 
-        # Hole das OfferDetail
+        # Ensure the OfferDetail exists
         offer_detail = OfferDetail.objects.get(id=offer_detail_id)
 
-        # Erstelle die Order basierend auf OfferDetail
+        # Create the order
         order = Order.objects.create(
             customer_user=customer_user,
             business_user=offer_detail.offer.user,
@@ -103,23 +130,26 @@ class OrderSerializer(serializers.ModelSerializer):
 
 
 class OfferDetailSerializer(serializers.ModelSerializer):
+    """
+    Validates OfferDetails
+    """
     class Meta:
         model = OfferDetail
         fields = ['id', 'title', 'revisions', 'delivery_time_in_days',
                   'price', 'features', 'offer_type']
 
     def validate(self, data):
-        # Revisions dürfen nicht unter -1 sein
+        # Revisions must not be below -1
         if data['revisions'] < -1:
             raise serializers.ValidationError(
                 "Revisions must be -1 or greater.")
 
-        # Die Lieferzeit muss positiv sein
+        # The delivery time must be positive
         if data['delivery_time_in_days'] <= 0:
             raise serializers.ValidationError(
                 "Delivery time must be a positive integer.")
 
-        # Features müssen mindestens einen Eintrag haben
+        # Features must have at least one entry
         if not data['features']:
             raise serializers.ValidationError(
                 "Mindestens ein Feature muss angegeben werden.")
@@ -128,19 +158,25 @@ class OfferDetailSerializer(serializers.ModelSerializer):
 
 
 class UserSerializer(serializers.ModelSerializer):
+    """
+    Define fields for user
+    """
     class Meta:
         model = User
         fields = ['pk', 'first_name', 'last_name', 'username']
 
 
 class BusinessSerializer(serializers.ModelSerializer):
-    user = UserSerializer()  # Hier verschachtelter User-Serializer
+    """
+    Define fields for business profiles with nested user data
+    """
+    user = UserSerializer()  # nested user serializer
     file = serializers.FileField(required=False)
 
     class Meta:
         model = Profile
         fields = [
-            'user',           # Benutzerinformationen als verschachteltes Objekt
+            'user',           # nested user object
             'file',
             'location',
             'tel',
@@ -155,7 +191,7 @@ class BusinessSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         representation = super().to_representation(instance)
 
-        # Füge den relativen Pfad für das `file`-Feld hinzu, falls vorhanden
+        # Add the relative path for the `file` field, if available
         if instance.file:
             representation['file'] = f"{settings.MEDIA_URL}{instance.file}"
 
@@ -163,13 +199,16 @@ class BusinessSerializer(serializers.ModelSerializer):
 
 
 class CustomerSerializer(serializers.ModelSerializer):
-    user = UserSerializer()  # Hier verschachtelter User-Serializer
+    """
+    Define fields for customer profiles with nested user data
+    """
+    user = UserSerializer()  # nested user serializer
     file = serializers.FileField(required=False)
 
     class Meta:
         model = Profile
         fields = [
-            'user',           # Benutzerinformationen als verschachteltes Objekt
+            'user',           # nested user object
             'file',
             'created_at',
             'type',
@@ -181,7 +220,7 @@ class CustomerSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         representation = super().to_representation(instance)
 
-        # Füge den relativen Pfad für das `file`-Feld hinzu, falls vorhanden
+        # Add the relative path for the `file` field, if available
         if instance.file:
             representation['file'] = f"{settings.MEDIA_URL}{instance.file}"
 
@@ -189,8 +228,9 @@ class CustomerSerializer(serializers.ModelSerializer):
 
 
 class OfferSerializer(serializers.ModelSerializer):
-
-    # Für GET, gibt nur id und url zurück
+    """
+    Validation and definiation of create, update and list methods for offers
+    """
     details = OfferDetailLinkSerializer(many=True, read_only=True)
     user_details = UserSerializer(source='user', read_only=True)
     min_price = serializers.SerializerMethodField()
@@ -204,65 +244,109 @@ class OfferSerializer(serializers.ModelSerializer):
         ]
 
         extra_kwargs = {
-            'user': {'read_only': True}  # Macht das 'user'-Feld nur lesbar
+            'user': {'read_only': True}
         }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Dynamisch anpassen, basierend auf der HTTP-Methode (POST oder GET)
-        if self.context.get('request') and self.context['request'].method == 'POST':
-            # Für POST: `details` wird als write_only mit `OfferDetailSerializer` verwendet
+        # Adapt dynamically, based on the HTTP method (POST or GET)
+        if self.context.get('request') and self.context['request'].method in ['POST', 'PUT', 'PATCH']:
+            # For POST: `details` is used as write_only with `OfferDetailSerialiser
             self.fields['details'] = OfferDetailSerializer(
                 many=True, write_only=True)
         elif self.context.get('request') and self.context['request'].method == 'GET':
-            # Für GET: `details` wird als read_only mit `OfferDetailLinkSerializer` verwendet
+            # For GET: `details` is used as read_only with `OfferDetailLinkSerialiser
             self.fields['details'] = OfferDetailLinkSerializer(
                 many=True, read_only=True)
 
     def get_min_price(self, obj):
-        # Berechnet den minimalen Preis der OfferDetails
+        # Calculates the minimum price of the offerDetails
         return obj.details.aggregate(min_price=Min('price'))['min_price']
 
     def get_min_delivery_time(self, obj):
-        # Berechnet die minimale Lieferzeit der OfferDetails
+        # Calculates the minimum delivery time of the offerDetails
         return obj.details.aggregate(min_delivery_time=Min('delivery_time_in_days'))['min_delivery_time']
 
     def validate_details(self, value):
-        # Überprüfen, ob genau drei Details vorhanden sind
+        """
+        Validiert, dass genau drei OfferDetails vorhanden sind und die richtigen Typen haben.
+        """
+
         if len(value) != 3:
             raise serializers.ValidationError(
-                "Es müssen genau drei Angebotsdetails vorhanden sein.")
+                "Es müssen genau drei Angebotsdetails vorhanden sein."
+            )
 
-        # Überprüfen, ob die offer_types basic, standard und premium abgedeckt sind
+        # Check whether each detail has the key `offer_type`.
+        for detail in value:
+            if 'offer_type' not in detail:
+                raise serializers.ValidationError(
+                    f"Ein Angebotsdetail fehlt der Schlüssel 'offer_type': {
+                        detail}"
+                )
+
+        # Check whether the offer_types basic, standard and premium are covered
         offer_types = {detail['offer_type'] for detail in value}
         if offer_types != {'basic', 'standard', 'premium'}:
             raise serializers.ValidationError(
-                "Die Angebotsdetails müssen genau die Typen 'basic', 'standard' und 'premium' enthalten.")
+                "Die Angebotsdetails müssen die Typen 'basic', 'standard' und 'premium' enthalten."
+            )
 
         return value
 
     def create(self, validated_data):
-        # Extrahiert `details_data` und erstellt das Offer mit den zugehörigen OfferDetail-Objekten
+        # Extracts `details_data` and creates the Offer with the associated OfferDetail objects
         details_data = validated_data.pop('details', [])
-        # Hole den angemeldeten Benutzer aus dem Kontext
+        # Remove the logged-in user from the context
         user = self.context['request'].user if self.context['request'] else None
 
-        # Überprüfe, ob ein Benutzer authentifiziert ist
+        # Check whether a user is authenticated
         if not user or not user.is_authenticated:
             raise serializers.ValidationError(
                 "Der Benutzer muss angemeldet sein, um ein Angebot zu erstellen.")
 
-        # user = user.user.pk
         offer = Offer.objects.create(user=user, **validated_data)
 
-        # Erstellt die OfferDetail-Objekte und verknüpft sie mit dem Offer
+        # Creates the OfferDetail objects and links them to the Offer
         for detail_data in details_data:
             OfferDetail.objects.create(offer=offer, **detail_data)
 
         return offer
 
+    def update(self, instance, validated_data):
+        # Extract the `details` data from the validated data
+        details_data = validated_data.pop('details', [])
+
+        # Update the fields of the offer (top-level fields)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        # Update or create the OfferDetails
+        existing_detail_ids = [detail['id']
+                               for detail in details_data if 'id' in detail]
+        # Delete details that are no longer in the payload
+        instance.details.exclude(id__in=existing_detail_ids).delete()
+
+        # Update or create details
+        for detail_data in details_data:
+            detail_id = detail_data.pop('id', None)
+            if detail_id:  # If an ID exists, update detail
+                detail_instance = OfferDetail.objects.get(
+                    id=detail_id, offer=instance)
+                for attr, value in detail_data.items():
+                    setattr(detail_instance, attr, value)
+                detail_instance.save()
+            else:  # Otherwise, create a new detail
+                OfferDetail.objects.create(offer=instance, **detail_data)
+
+        return instance
+
 
 class ProfileSerializer(serializers.ModelSerializer):
+    """
+    Defines fields for profile and include nested user data
+    """
     user = serializers.PrimaryKeyRelatedField(
         queryset=User.objects.all())  # ID des Users
     username = serializers.CharField(source="user.username", read_only=True)
@@ -274,10 +358,10 @@ class ProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = Profile
         fields = [
-            'user',           # Benutzer-ID
-            'username',       # Benutzername
-            'first_name',     # Vorname
-            'last_name',      # Nachname
+            'user',
+            'username',
+            'first_name',
+            'last_name',
             'file',
             'location',
             'tel',
@@ -288,7 +372,6 @@ class ProfileSerializer(serializers.ModelSerializer):
             'created_at'
         ]
         extra_kwargs = {
-            # Das Feld `file` ist nicht erforderlich
             'file': {'required': False}
         }
 
@@ -303,9 +386,9 @@ class ProfileSerializer(serializers.ModelSerializer):
         }
 
         representation.update(user_data)
-        # Überprüfen, ob das Feld `file` einen Wert hat und füge nur den relativen Pfad hinzu
+        # Check if the field `file` has a value and add only the relative path
         if instance.file:
-            # MEDIA_URL direkt verwenden, um doppelte URLs zu vermeiden
+            # Use MEDIA_URL directly to avoid duplicate URLs
             representation['file'] = f"{settings.MEDIA_URL}{instance.file}"
 
         return representation

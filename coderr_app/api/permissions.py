@@ -1,77 +1,68 @@
-from rest_framework.permissions import BasePermission
 from rest_framework.permissions import BasePermission, SAFE_METHODS
+import logging
+logger = logging.getLogger(__name__)
 
+class IsAuthenticatedOrReadOnlyForProfile(BasePermission):
+    """
+    Allows read access for everyone, write access only for authenticated users,
+    who have the profile.
+    """
+    def has_permission(self, request, view):
+        # Read access (GET, HEAD, OPTIONS) is permitted for all
+        if request.method in SAFE_METHODS:
+            return True
+        # Write access is only permitted for authenticated users
+        return request.user and request.user.is_authenticated
+
+    def has_object_permission(self, request, view, obj):
+        # Read access to the object is permitted for everyone
+        if request.method in SAFE_METHODS:
+            return True
+        is_owner = obj.user == request.user
+        logger.debug(f"User: {request.user}, Is Owner: {is_owner}")
+        return is_owner
+        
+        
 
 class IsBusinessUserOrReadOnly(BasePermission):
     """
-    Erlaubt GET und andere "sichere" Methoden für alle Benutzer.
-    POST und andere schreibende Methoden sind nur für 'business'-Benutzer erlaubt.
+    Allows GET and other ‘secure’ methods for all users.
+    POST and other write methods are only allowed for ‘business’ users.
     """
 
     def has_permission(self, request, view):
-        # Erlaube "sichere" Methoden (GET, HEAD, OPTIONS) für alle Benutzer
+        # Allow ‘secure’ methods (GET, HEAD, OPTIONS) for all users
         if request.method in SAFE_METHODS:
             return True
 
-        # Für schreibende Methoden prüfen, ob der Benutzer authentifiziert ist
+        # For write methods, check whether the user is authenticated
         if not request.user or not request.user.is_authenticated:
             return False
 
-        # Überprüfen, ob der Benutzer vom Typ 'business' ist
+        # Check whether the user is of the ‘business’ type
         return getattr(request.user.profile, 'type', None) == 'business'
-
-
-class OrderPermissions(BasePermission):
-    """
-    Custom permission for OrderViewSet:
-    - PATCH: Nur der `business_user` kann den Status von "in_progress" zu "completed" oder "cancelled" ändern.
-    - PUT: Nicht erlaubt.
-    - DELETE: Nur Admin-Benutzer (Staff).
-    """
-
-    def has_permission(self, request, view):
-        # PUT ist für alle verboten
-        if request.method == 'PUT':
-            return False
-
-        # DELETE ist nur für Admin-Benutzer erlaubt
-        if request.method == 'DELETE':
-            return request.user.is_staff
-
-        # POST ist nur für Business-User erlaubt
-        if request.method == 'POST':
-            return request.user.is_authenticated and hasattr(request.user, 'profile') and request.user.profile.type == 'business'
-
-        # PATCH und andere Methoden werden in has_object_permission behandelt
-        return request.user.is_authenticated
-
-    def has_object_permission(self, request, view, obj):
-        # PATCH: Business-User kann den Status ändern, wenn er "business_user" der Bestellung ist
-        if request.method == 'PATCH':
-            if request.user == obj.business_user:
-                # Erlaubt nur, wenn der Status von "in_progress" auf "completed" oder "cancelled" geändert wird
-                new_status = request.data.get('status')
-                allowed_status_transitions = ["completed", "cancelled"]
-                return obj.status == "in_progress" and new_status in allowed_status_transitions
-            return False
-
-        # DELETE: Nur Admin-Benutzer (überprüft bereits in has_permission)
-        if request.method == 'DELETE':
-            return request.user.is_staff
-
-        # Standardmäßig erlauben, falls keine spezifische Regel greift
-        return True
 
 
 class IsReviewerOrAdmin(BasePermission):
     """
-    Erlaubt Änderungen und Löschungen nur dem Ersteller (Reviewer) oder Admins.
+    Update or delete olny for owner or admin allowed
     """
 
     def has_object_permission(self, request, view, obj):
-        # Lesen ist für alle erlaubt
+        # Read allowed for everone
         if request.method in SAFE_METHODS:
             return True
 
-        # Überprüfen, ob der Benutzer der Ersteller der Bewertung oder ein Admin ist
+        # check if user ist owner of review or admin
         return request.user == obj.reviewer or request.user.is_staff
+    
+class IsOwnerOrReadOnly(BasePermission):
+    """
+    Custom permission: Only the owner of an object can edit or delete it.
+    """
+    def has_object_permission(self, request, view, obj):
+        # SAFE_METHODS (GET, HEAD, OPTIONS) allowed for veryone
+        if request.method in ('GET', 'HEAD', 'OPTIONS'):
+            return True
+        # For PUT, PATCH und DELETE the user hast to be the owwner
+        return obj.user == request.user

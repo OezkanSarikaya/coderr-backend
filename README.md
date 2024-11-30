@@ -13,7 +13,6 @@ The backend provides the API for the frontend, which can be found here: [Coderr 
 - Only **Business Users** can create and edit offers.
 - **Customer Users** can place orders for offers.
 - Only **Business Users** can manage orders.
-- Once an order is marked as completed, its status cannot be changed.
 - Only **Customer Users** can create, edit, or delete reviews only for **Business Users**.
 - HTML tags are removed from all text inputs to ensure clean data.
 

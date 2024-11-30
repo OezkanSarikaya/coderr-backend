@@ -12,7 +12,7 @@ from django.contrib.auth import authenticate
 def get_guest_user():
     guest_username = "guest@domain.com"
 
-    # Gastbenutzer abrufen oder erstellen
+    # Get or create guestuser
     guest_user, created = User.objects.get_or_create(
         username=guest_username,
         defaults={'is_active': True, 'first_name': 'Guest',
@@ -20,31 +20,31 @@ def get_guest_user():
     )
 
     if created:
-        guest_user.set_unusable_password()  # Gast-Benutzer ohne Passwort
+        guest_user.set_unusable_password()  # guestuser withour password
         guest_user.save()
 
-    # Token für den Gastbenutzer abrufen oder erstellen
+    # get or create token for guestuser
     token, _ = Token.objects.get_or_create(user=guest_user)
 
-    # Kontakt für den Gastbenutzer abrufen oder erstellen
+    # get or create contact for guestuser
     Profile.objects.get_or_create(
         user=guest_user,
         defaults={
-            'email': "guest@domain.com",  # Pseudo-Email für den Gast
+            'email': "guest@domain.com",  # Pseudo-Email for guest
             'name': "Guest User",
-            'color': 0  # Beispielwert für Farbe, falls erforderlich
         }
     )
 
     return guest_user, token
 
-
+"""
+Registration: Save userdata and profile and response json for LocalStorage
+"""
 class RegistrationView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = RegistrationSerializer(data=request.data)
-        # data = {}
 
         if serializer.is_valid():
             saved_account = serializer.save()
@@ -60,6 +60,9 @@ class RegistrationView(APIView):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
+"""
+Login: Authenticate User and response json for LocalStorage
+"""
 class CustomLoginView(APIView):
     permission_classes = [AllowAny]
 

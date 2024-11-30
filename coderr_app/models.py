@@ -26,6 +26,9 @@ class Review(models.Model):
 
 
 class Order(models.Model):
+    """
+    Represents an order created by a customer user.
+    """
     STATUS_CHOICES = [
         ('in_progress', 'In Bearbeitung'),
         ('completed', 'Abgeschlossen'),
@@ -55,6 +58,9 @@ class Order(models.Model):
 
 
 class Profile(models.Model):
+    """
+    Represents a profile which is conneted to a user.
+    """
     TYPE_CHOICES = [
         ('business', 'Business'),
         ('customer', 'Customer'),
@@ -72,6 +78,9 @@ class Profile(models.Model):
 
 
 class Offer(models.Model):
+    """
+    Represents an offer created by a business user.
+    """
     user = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name='offers')
     title = models.CharField(max_length=255, blank=True, null=True)
@@ -85,14 +94,15 @@ class Offer(models.Model):
 
 
 class OfferDetail(models.Model):
+    """
+    Represents offerdetail which are connected to an offer.
+    """
     OFFER_TYPE_CHOICES = [
         ('basic', 'Basic'),
         ('standard', 'Standard'),
         ('premium', 'Premium'),
     ]
-
-    offer = models.ForeignKey(
-        Offer, on_delete=models.CASCADE, related_name='details', null=True)
+    offer = models.ForeignKey(Offer, on_delete=models.CASCADE, related_name='details', null=True)
     title = models.CharField(max_length=255)
     revisions = models.IntegerField(default=-1)
     delivery_time_in_days = models.PositiveIntegerField()  # Nur positive Integer

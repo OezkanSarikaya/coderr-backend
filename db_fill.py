@@ -51,6 +51,8 @@ def create_users():
     for i in range(3):  # 3 Business-Benutzer
         user = User.objects.create_user(
             username=f'business_user{i + 1}',
+            first_name='Business',
+            last_name=f'User{i + 1}',
             email=f'business{i + 1}@example.com',
             password='password123'
         )
@@ -65,6 +67,8 @@ def create_users():
     for i in range(3):  # 3 Kunden-Benutzer
         user = User.objects.create_user(
             username=f'customer_user{i + 1}',
+            first_name='Customer',
+            last_name=f'User{i + 1}',
             email=f'customer{i + 1}@example.com',
             password='password123'
         )

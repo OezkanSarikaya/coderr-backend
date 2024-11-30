@@ -1,14 +1,14 @@
-# user_auth_app/api/serializers.py
 from rest_framework import serializers
 from django.contrib.auth.models import User
 from coderr_app.models import Profile
 
-
+"""
+Validate registration and create user and profile
+"""
 class RegistrationSerializer(serializers.ModelSerializer):
     repeated_password = serializers.CharField(write_only=True)
-    # Optionales Feld für den Typ
-    type = serializers.ChoiceField(
-        choices=Profile.TYPE_CHOICES, required=False)
+    # Required Field Type
+    type = serializers.ChoiceField(choices=Profile.TYPE_CHOICES, required=True)
 
     class Meta:
         model = User
@@ -20,13 +20,13 @@ class RegistrationSerializer(serializers.ModelSerializer):
         }
 
     def validate(self, data):
-        # Passwortvalidierung
+        # Password validation
         if data['password'] != data['repeated_password']:
             raise serializers.ValidationError({
                 "password": ["Das Passwort ist nicht gleich mit dem wiederholten Passwort"]
             })
 
-        # Email-Validierung
+        # Email validation
         if 'email' not in data or not data['email']:
             raise serializers.ValidationError({
                 "email": ["E-Mail ist erforderlich."]
@@ -35,7 +35,7 @@ class RegistrationSerializer(serializers.ModelSerializer):
         return data
 
     def validate_email(self, value):
-        # Überprüfung, ob die E-Mail bereits existiert
+        # Check if email already exists
         if User.objects.filter(email=value).exists():
             raise serializers.ValidationError(
                 "Ein Benutzer mit dieser E-Mail existiert bereits.")
@@ -43,7 +43,7 @@ class RegistrationSerializer(serializers.ModelSerializer):
         return value
 
     def validate_username(self, value):
-        # Überprüfung, ob der Benutzername bereits existiert
+        # Check if username already exists
         if User.objects.filter(username=value).exists():
             raise serializers.ValidationError(
                 {"username": ["Dieser Benutzername ist bereits vergeben."]})
@@ -51,7 +51,7 @@ class RegistrationSerializer(serializers.ModelSerializer):
         return value
 
     def save(self):
-        # Benutzer erstellen
+        # Creates user
         account = User(
             email=self.validated_data['email'],
             username=self.validated_data['username']
@@ -59,7 +59,7 @@ class RegistrationSerializer(serializers.ModelSerializer):
         account.set_password(self.validated_data['password'])
         account.save()
 
-        # Profil erstellen und verknüpfen
+        # Creates profile and link tu user
         profile_type = self.validated_data.get('type', 'customer')
         Profile.objects.create(
             user=account, email=account.email, type=profile_type)
