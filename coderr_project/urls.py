@@ -22,8 +22,7 @@ from django.conf.urls.static import static
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('',include('coderr_app.api.urls')),
-    path('',include('user_auth_app.api.urls')),
-    # path('uploads'),
+    path('',include('user_auth_app.api.urls')),    
 ]
 
 if settings.DEBUG:

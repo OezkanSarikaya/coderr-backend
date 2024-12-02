@@ -281,8 +281,7 @@ class OfferSerializer(serializers.ModelSerializer):
         for detail in value:
             if 'offer_type' not in detail:
                 raise serializers.ValidationError(
-                    f"Ein Angebotsdetail fehlt der Schlüssel 'offer_type': {
-                        detail}"
+                    f"Ein Angebotsdetail fehlt der Schlüssel 'offer_type': {detail}"
                 )
 
         # Check whether the offer_types basic, standard and premium are covered
