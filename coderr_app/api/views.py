@@ -224,9 +224,6 @@ class OfferViewSet(viewsets.ModelViewSet):
         # Use OfferSerializer with full details for the response
         response_serializer = OfferSerializer(offer, context={'request': request})
 
-        # Debugging: Output the response data
-        print("DEBUG - Response data:", response_serializer.data)
-
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
     def perform_create(self, serializer):
@@ -235,69 +232,16 @@ class OfferViewSet(viewsets.ModelViewSet):
         """
         serializer.save()
 
-    """
-    Handles CRUD operations for offers. Only business users can modify offers.
-    """
-    queryset = Offer.objects.all()
-    serializer_class = OfferSerializer
-    permission_classes = [IsBusinessUserOrReadOnly, IsOwnerOrReadOnly]
-    pagination_class = LargeResultsSetPagination
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    ordering_fields = ['updated_at', 'min_price']
-    search_fields = ['title', 'description']
-
-    def get_queryset(self):
+    def patch(self, request, *args, **kwargs):
         """
-        Filters offers based on query parameters like creator ID, minimum price, or delivery time.
+        Custom PATCH method to return only the necessary fields in the response.
         """
-        queryset = super().get_queryset().prefetch_related('details')
-        creator_id = self.request.query_params.get('creator_id')
-
-        if creator_id:
-            queryset = queryset.filter(user_id=creator_id)
-
-        queryset = queryset.annotate(
-            min_price=Min('details__price'),
-            min_delivery_time=Min('details__delivery_time_in_days')
-        )
-
-        min_price = self.request.query_params.get('min_price')
-        if min_price:
-            queryset = queryset.filter(min_price__lte=min_price)
-
-        max_delivery_time = self.request.query_params.get('max_delivery_time')
-        if max_delivery_time:
-            queryset = queryset.filter(min_delivery_time__lte=max_delivery_time)
-
-        return queryset
-
-    def perform_create(self, serializer):
-        """
-        Save the offer and related details during creation.
-        """
-        offer = serializer.save(user=self.request.user)
-        print("DEBUG - Offer created:", offer)  # Debugging: Inspect created offer object
-
-    def create(self, request, *args, **kwargs):
-        """
-        Override create method to debug serializer data and handle headers correctly.
-        """
-        serializer = self.get_serializer(data=request.data)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
-        self.perform_create(serializer)
-        print("DEBUG - Serializer data after save:", serializer.data)  # Debugging
-        headers = self.get_success_headers(serializer.data)
-        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+        self.perform_update(serializer)
 
-    def get_success_headers(self, data):
-        """
-        Generate headers for successful creation responses.
-        """
-        try:
-            return {'Location': str(data.get('id', ''))}
-        except KeyError:
-            return {}
-
+        return Response(serializer.data)
 
 class ProfileViewSet(viewsets.ModelViewSet):
     """

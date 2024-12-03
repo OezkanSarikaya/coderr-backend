@@ -5,6 +5,7 @@ from django.conf import settings  # For access to MEDIA_URL
 from django.urls import reverse
 from django.db.models import Min
 from rest_framework.exceptions import ValidationError
+from rest_framework import status
 
 
 class OfferDetailLinkSerializer(serializers.ModelSerializer):
@@ -15,7 +16,7 @@ class OfferDetailLinkSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = OfferDetail
-        fields = ['id', 'url']
+        fields = ['id', 'url','title']
 
     def get_url(self, obj):
         # Dynamically create the URL path for each OfferDetail object
@@ -65,6 +66,9 @@ class OrderSerializer(serializers.ModelSerializer):
     offer_detail_id = serializers.IntegerField(
         write_only=True, required=False  # `offer_detail_id` only needed for create
     )
+    # Custom field to ensure price is output as a number (decimal, not string)
+    price = serializers.DecimalField(max_digits=10, decimal_places=2, coerce_to_string=False)
+
 
     class Meta:
         model = Order
@@ -84,22 +88,21 @@ class OrderSerializer(serializers.ModelSerializer):
         """
         request = self.context.get('request')
         if not request or not request.user.is_authenticated:
-            raise serializers.ValidationError("Der Benutzer muss angemeldet sein.")
+            raise serializers.ValidationError({"Der Benutzer muss angemeldet sein."}, code=status.HTTP_401_UNAUTHORIZED)
 
         # Only `customer_user` are allowed to create an order
         if request.method == 'POST':
             if not hasattr(request.user, 'profile') or request.user.profile.type != 'customer':
-                raise serializers.ValidationError(
-                    "Nur Benutzer mit Kundenprofil können Bestellungen erstellen."
-                )
+                raise serializers.ValidationError({"detail": "Nur Benutzer mit Kundenprofil können Bestellungen erstellen"}, code=status.HTTP_403_FORBIDDEN)
 
         # Only `business_user` are allowed to update an order
         if request.method in ['PUT', 'PATCH']:
             order = self.instance
             if not (request.user == order.business_user):
-                raise serializers.ValidationError(
-                    "Sie haben keine Berechtigung diese Bestellung zu bearbeiten"
-                )
+                raise serializers.ValidationError({"detail": "Sie haben keine Berechtigung diese Bestellung zu bearbeiten"}, code=status.HTTP_403_FORBIDDEN)
+
+                   
+                
 
         return attrs
 
@@ -193,6 +196,11 @@ class BusinessSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         representation = super().to_representation(instance)
 
+        # Iterate over fields and replace None with an empty string
+        for field in representation:
+            if representation[field] is None:
+                representation[field] = ''
+
         # Add the relative path for the `file` field, if available
         if instance.file:
             representation['file'] = f"{settings.MEDIA_URL}{instance.file}"
@@ -222,31 +230,33 @@ class CustomerSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         representation = super().to_representation(instance)
 
+        # Rename 'created_at' to 'uploaded_at'
+        if 'created_at' in representation:
+            representation['uploaded_at'] = representation.pop('created_at')
+
+
         # Add the relative path for the `file` field, if available
         if instance.file:
             representation['file'] = f"{settings.MEDIA_URL}{instance.file}"
 
-        return representation
 
+        return {
+            'user': representation['user'],
+            'file': representation.get('file', ''),
+            'uploaded_at': representation['uploaded_at'],
+            'type': representation['type'],
+        }
 
 class OfferSerializer(serializers.ModelSerializer):
     """
     Offer serializer for both creating and fetching offers.
     """
-    details = serializers.SerializerMethodField()
+    details = OfferDetailSerializer(many=True, read_only=True)  # Details werden nur im GET-Request zurückgegeben
     user_details = UserSerializer(source='user', read_only=True)
-    min_price = serializers.SerializerMethodField()
-    min_delivery_time = serializers.SerializerMethodField()
 
     class Meta:
         model = Offer
-        fields = [
-            'id', 'user', 'title', 'image', 'description', 'created_at', 'updated_at',
-            'details', 'min_price', 'min_delivery_time', 'user_details'
-        ]
-        extra_kwargs = {
-            'user': {'read_only': True}
-        }
+        fields = ['id', 'title', 'image', 'description', 'details', 'user_details']  # Füge `user_details` hier hinzu, um den Fehler zu beheben.
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -256,20 +266,35 @@ class OfferSerializer(serializers.ModelSerializer):
         elif request and request.method == 'GET':
             self.fields['details'] = OfferDetailLinkSerializer(many=True, read_only=True)
 
-    def get_details(self, obj):
-        # Returns details for the response based on the request context
-        request = self.context.get('request')
-        if request and request.method in ['POST', 'PUT', 'PATCH']:
-            return OfferDetailSerializer(obj.details.all(), many=True).data
-        return OfferDetailLinkSerializer(obj.details.all(), many=True).data
-
-    def get_min_price(self, obj):
-        return obj.details.aggregate(min_price=Min('price'))['min_price']
-
-    def get_min_delivery_time(self, obj):
-        return obj.details.aggregate(min_delivery_time=Min('delivery_time_in_days'))['min_delivery_time']
+    def to_representation(self, instance):
+        """
+        Überschreibt die Standard-Darstellung des Response-Objekts für PATCH-Requests.
+        """
+        # Standard-Darstellung ohne Min-Preis und Min-Delivery-Time
+        representation = super().to_representation(instance)
 
 
+        # Details ID-List für jedes Detail
+        details = representation.get('details', [])
+        for detail in details:
+            detail['id'] = detail['id']  # Hier wird die Detail-ID hinzugefügt
+
+        # Entferne nicht gewünschte Felder wie min_price und min_delivery_time
+        representation.pop('min_price', None)
+        representation.pop('min_delivery_time', None)
+
+        # Entferne `user_details` aus der Darstellung für PATCH
+        if 'user_details' in representation:
+            representation.pop('user_details')
+
+        # Entferne leere Felder wie `image` und `description`, wenn sie nicht im Payload enthalten sind
+        if 'image' in representation and representation['image'] is None:
+            representation.pop('image')
+
+        if 'description' in representation and representation['description'] is None:
+            representation.pop('description')
+
+        return representation
 
     def create(self, validated_data):
         """
@@ -326,9 +351,6 @@ class OfferSerializer(serializers.ModelSerializer):
             OfferDetail.objects.create(offer=instance, **detail_data)
 
         return instance
-
-
-
 
 
 class ProfileSerializer(serializers.ModelSerializer):
