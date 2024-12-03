@@ -200,14 +200,49 @@ class OrderViewSet(viewsets.ModelViewSet):
 
 class OfferViewSet(viewsets.ModelViewSet):
     """
+    Handles CRUD operations for offers.
+    """
+    queryset = Offer.objects.all()
+    serializer_class = OfferSerializer
+    permission_classes = [IsBusinessUserOrReadOnly, IsOwnerOrReadOnly]
+    pagination_class = LargeResultsSetPagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    ordering_fields = ['updated_at', 'min_price']
+    search_fields = ['title', 'description']
+
+    def create(self, request, *args, **kwargs):
+        """
+        Override create to customize the response with full details.
+        """
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)  # Validate the incoming data
+        self.perform_create(serializer)
+
+        # Fetch the created offer instance
+        offer = serializer.instance
+
+        # Use OfferSerializer with full details for the response
+        response_serializer = OfferSerializer(offer, context={'request': request})
+
+        # Debugging: Output the response data
+        print("DEBUG - Response data:", response_serializer.data)
+
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+    def perform_create(self, serializer):
+        """
+        Save the offer with the associated details.
+        """
+        serializer.save()
+
+    """
     Handles CRUD operations for offers. Only business users can modify offers.
     """
     queryset = Offer.objects.all()
     serializer_class = OfferSerializer
     permission_classes = [IsBusinessUserOrReadOnly, IsOwnerOrReadOnly]
     pagination_class = LargeResultsSetPagination
-    filter_backends = [DjangoFilterBackend,
-                       filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     ordering_fields = ['updated_at', 'min_price']
     search_fields = ['title', 'description']
 
@@ -215,8 +250,7 @@ class OfferViewSet(viewsets.ModelViewSet):
         """
         Filters offers based on query parameters like creator ID, minimum price, or delivery time.
         """
-        queryset = super().get_queryset()
-        queryset = queryset.prefetch_related('details')
+        queryset = super().get_queryset().prefetch_related('details')
         creator_id = self.request.query_params.get('creator_id')
 
         if creator_id:
@@ -233,97 +267,36 @@ class OfferViewSet(viewsets.ModelViewSet):
 
         max_delivery_time = self.request.query_params.get('max_delivery_time')
         if max_delivery_time:
-            queryset = queryset.filter(
-                min_delivery_time__lte=max_delivery_time)
+            queryset = queryset.filter(min_delivery_time__lte=max_delivery_time)
 
         return queryset
 
-    def list(self, request, *args, **kwargs):
+    def perform_create(self, serializer):
         """
-        Handles filtering, pagination, and optional removal of the `page` parameter.
+        Save the offer and related details during creation.
         """
-        # Check whether search or filter parameters are available
-        search_query = request.query_params.get('search', '').strip()
-        max_delivery_time = request.query_params.get('max_delivery_time', '').strip()
-        page = request.query_params.get('page', '').strip()
-        page = int(page) if page else 1
+        offer = serializer.save(user=self.request.user)
+        print("DEBUG - Offer created:", offer)  # Debugging: Inspect created offer object
 
-        # If no filters are available, call up the standard logic
-        if not search_query and not max_delivery_time:
-            return super().list(request, *args, **kwargs)
-
-        # Execute the QuerySet to count the filtered results
-        filtered_queryset = self.filter_queryset(self.get_queryset())
-        total_results = filtered_queryset.count()
-
-        # Get the page size from the pagination class or the defaults
-        page_size = getattr(self.pagination_class(), 'page_size', 6)
-
-        # If the number of pages is greater than the total number of pages due to the result, set `page` to 1
-        if page > ceil(total_results / page_size):
-            request.query_params._mutable = True  # Set QueryDict to mutable
-            request.query_params.pop('page', 1)  # set `page` to 1
-            request.query_params._mutable = False  # Set QueryDict to unmutable again
-
-        # Call up standard logic
-        response = super().list(request, *args, **kwargs)
-        return response
-
-    def perform_update(self, serializer):
+    def create(self, request, *args, **kwargs):
         """
-        Override update to handle nested `OfferDetails`.
+        Override create method to debug serializer data and handle headers correctly.
         """
-        details_data = self.request.data.get('details', [])
-        offer = serializer.save()  # Saves the offer
-
-        # Update or create OfferDetails
-        for detail_data in details_data:
-            detail_id = detail_data.get('id')
-            if detail_id:
-                # Update existing detail
-                OfferDetail.objects.filter(
-                    id=detail_id, offer=offer).update(**detail_data)
-            else:
-                # Create new detail
-                OfferDetail.objects.create(offer=offer, **detail_data)
-
-    def perform_destroy(self, instance):
-        """
-        Override delete to ensure only owners can delete.
-        """
-        if instance.user != self.request.user:
-            raise PermissionDenied(
-                "You do not have permission to delete this offer.")
-        instance.delete()
-
-    def update(self, request, *args, **kwargs):
-        """
-        Update method to restrict access to offer owners and handle nested `details` updates.
-        """
-        instance = self.get_object()  # Get the Offer instance being updated
-
-        # Access restriction: Check whether the current user is the owner
-        if instance.user != request.user:
-            return Response({'error': 'Unauthorized: You can only update your own offers.'}, status=status.HTTP_403_FORBIDDEN)
-
-        # Call the serializer's update logic
-        # Check if it's a partial update
-        partial = kwargs.pop('partial', False)
-        serializer = self.get_serializer(
-            instance, data=request.data, partial=partial)
-
-        # Validation of incoming data
+        serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        print("DEBUG - Serializer data after save:", serializer.data)  # Debugging
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
-        # Save the updated data
-        self.perform_update(serializer)
-
-        # Custom logic for response
-        if getattr(instance, '_prefetched_objects_cache', None):
-            # If any prefetch fields were preloaded, they need to be updated
-            instance._prefetched_objects_cache = {}
-
-        return Response(serializer.data)
+    def get_success_headers(self, data):
+        """
+        Generate headers for successful creation responses.
+        """
+        try:
+            return {'Location': str(data.get('id', ''))}
+        except KeyError:
+            return {}
 
 
 class ProfileViewSet(viewsets.ModelViewSet):

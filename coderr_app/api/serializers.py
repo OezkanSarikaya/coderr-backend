@@ -4,6 +4,7 @@ from django.contrib.auth.models import User
 from django.conf import settings  # For access to MEDIA_URL
 from django.urls import reverse
 from django.db.models import Min
+from rest_framework.exceptions import ValidationError
 
 
 class OfferDetailLinkSerializer(serializers.ModelSerializer):
@@ -133,6 +134,7 @@ class OfferDetailSerializer(serializers.ModelSerializer):
     """
     Validates OfferDetails
     """
+    offer_type = serializers.ChoiceField(choices=['basic', 'standard', 'premium'])
     class Meta:
         model = OfferDetail
         fields = ['id', 'title', 'revisions', 'delivery_time_in_days',
@@ -229,9 +231,9 @@ class CustomerSerializer(serializers.ModelSerializer):
 
 class OfferSerializer(serializers.ModelSerializer):
     """
-    Validation and definiation of create, update and list methods for offers
+    Offer serializer for both creating and fetching offers.
     """
-    details = OfferDetailLinkSerializer(many=True, read_only=True)
+    details = serializers.SerializerMethodField()
     user_details = UserSerializer(source='user', read_only=True)
     min_price = serializers.SerializerMethodField()
     min_delivery_time = serializers.SerializerMethodField()
@@ -242,104 +244,91 @@ class OfferSerializer(serializers.ModelSerializer):
             'id', 'user', 'title', 'image', 'description', 'created_at', 'updated_at',
             'details', 'min_price', 'min_delivery_time', 'user_details'
         ]
-
         extra_kwargs = {
             'user': {'read_only': True}
         }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Adapt dynamically, based on the HTTP method (POST or GET)
-        if self.context.get('request') and self.context['request'].method in ['POST', 'PUT', 'PATCH']:
-            # For POST: `details` is used as write_only with `OfferDetailSerialiser
-            self.fields['details'] = OfferDetailSerializer(
-                many=True, write_only=True)
-        elif self.context.get('request') and self.context['request'].method == 'GET':
-            # For GET: `details` is used as read_only with `OfferDetailLinkSerialiser
-            self.fields['details'] = OfferDetailLinkSerializer(
-                many=True, read_only=True)
+        request = self.context.get('request')
+        if request and request.method in ['POST', 'PUT', 'PATCH']:
+            self.fields['details'] = OfferDetailSerializer(many=True, write_only=False)
+        elif request and request.method == 'GET':
+            self.fields['details'] = OfferDetailLinkSerializer(many=True, read_only=True)
+
+    def get_details(self, obj):
+        # Returns details for the response based on the request context
+        request = self.context.get('request')
+        if request and request.method in ['POST', 'PUT', 'PATCH']:
+            return OfferDetailSerializer(obj.details.all(), many=True).data
+        return OfferDetailLinkSerializer(obj.details.all(), many=True).data
 
     def get_min_price(self, obj):
-        # Calculates the minimum price of the offerDetails
         return obj.details.aggregate(min_price=Min('price'))['min_price']
 
     def get_min_delivery_time(self, obj):
-        # Calculates the minimum delivery time of the offerDetails
         return obj.details.aggregate(min_delivery_time=Min('delivery_time_in_days'))['min_delivery_time']
 
-    def validate_details(self, value):
-        """
-        Validiert, dass genau drei OfferDetails vorhanden sind und die richtigen Typen haben.
-        """
 
-        if len(value) != 3:
-            raise serializers.ValidationError(
-                "Es müssen genau drei Angebotsdetails vorhanden sein."
-            )
-
-        # Check whether each detail has the key `offer_type`.
-        for detail in value:
-            if 'offer_type' not in detail:
-                raise serializers.ValidationError(
-                    f"Ein Angebotsdetail fehlt der Schlüssel 'offer_type': {detail}"
-                )
-
-        # Check whether the offer_types basic, standard and premium are covered
-        offer_types = {detail['offer_type'] for detail in value}
-        if offer_types != {'basic', 'standard', 'premium'}:
-            raise serializers.ValidationError(
-                "Die Angebotsdetails müssen die Typen 'basic', 'standard' und 'premium' enthalten."
-            )
-
-        return value
 
     def create(self, validated_data):
-        # Extracts `details_data` and creates the Offer with the associated OfferDetail objects
+        """
+        Create an Offer and its associated OfferDetails with validation for three required details.
+        """
         details_data = validated_data.pop('details', [])
-        # Remove the logged-in user from the context
-        user = self.context['request'].user if self.context['request'] else None
+        user = self.context['request'].user
 
-        # Check whether a user is authenticated
-        if not user or not user.is_authenticated:
-            raise serializers.ValidationError(
-                "Der Benutzer muss angemeldet sein, um ein Angebot zu erstellen.")
+        # Ensure `user` isn't passed twice
+        if 'user' in validated_data:
+            del validated_data['user']
 
+        errors = {}
+
+        # Validate the number of details
+        if len(details_data) != 3:
+            errors['details'] = ["Es müssen genau 3 Angebotsdetails übergeben werden."]
+        
+        # Validate the offer_types
+        required_offer_types = {'basic', 'standard', 'premium'}
+        offer_types = {detail['offer_type'] for detail in details_data}
+        if offer_types != required_offer_types:
+            errors['details'] = errors.get('details', []) + [
+                "Die Angebotsdetails müssen genau eines der folgenden offer_type beinhalten: 'basic', 'standard' und 'premium'."
+            ]
+
+        if errors:
+            raise ValidationError(errors)
+
+        # Create the offer
         offer = Offer.objects.create(user=user, **validated_data)
 
-        # Creates the OfferDetail objects and links them to the Offer
+        # Create associated OfferDetails
         for detail_data in details_data:
             OfferDetail.objects.create(offer=offer, **detail_data)
 
         return offer
-
+    
     def update(self, instance, validated_data):
-        # Extract the `details` data from the validated data
-        details_data = validated_data.pop('details', [])
-
-        # Update the fields of the offer (top-level fields)
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
+        # Aktualisieren der Felder des Offer
+        instance.title = validated_data.get('title', instance.title)
+        instance.image = validated_data.get('image', instance.image)
+        instance.description = validated_data.get('description', instance.description)
         instance.save()
 
-        # Update or create the OfferDetails
-        existing_detail_ids = [detail['id']
-                               for detail in details_data if 'id' in detail]
-        # Delete details that are no longer in the payload
-        instance.details.exclude(id__in=existing_detail_ids).delete()
+        # Verarbeite die verschachtelten 'details' Daten
+        details_data = validated_data.get('details', [])
 
-        # Update or create details
+        # Lösche die alten Details (optional, je nachdem, wie du es handhaben möchtest)
+        instance.details.all().delete()
+
+        # Erstelle die neuen Details
         for detail_data in details_data:
-            detail_id = detail_data.pop('id', None)
-            if detail_id:  # If an ID exists, update detail
-                detail_instance = OfferDetail.objects.get(
-                    id=detail_id, offer=instance)
-                for attr, value in detail_data.items():
-                    setattr(detail_instance, attr, value)
-                detail_instance.save()
-            else:  # Otherwise, create a new detail
-                OfferDetail.objects.create(offer=instance, **detail_data)
+            OfferDetail.objects.create(offer=instance, **detail_data)
 
         return instance
+
+
+
 
 
 class ProfileSerializer(serializers.ModelSerializer):

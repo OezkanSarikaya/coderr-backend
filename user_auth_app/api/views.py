@@ -87,7 +87,7 @@ class CustomLoginView(APIView):
         password = request.data.get('password')
         user = authenticate(request, username=username, password=password)
         if user is None:
-            return Response({'error': 'Incorrect password'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'detail":': ['Falsche Anmeldedaten.']}, status=status.HTTP_400_BAD_REQUEST)
 
         # Falls Login erfolgreich, Token generieren und Contact-Daten abrufen
         token, created = Token.objects.get_or_create(user=user)
