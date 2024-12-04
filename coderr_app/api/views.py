@@ -22,6 +22,7 @@ from .permissions import IsBusinessUserOrReadOnly, IsReviewerOrAdmin, IsAuthenti
 from decimal import Decimal
 from coderr_app.api import serializers
 from math import ceil
+from django.db.models import Q
 
 
 class BaseInfo(APIView):
@@ -71,7 +72,7 @@ class OrderCountView(APIView):
 
         # Check if the business user exists
         if not Profile.objects.filter(user=business_user_id).exists():
-            return Response({"error": "Business user not found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"detail": ["Business user not found."]}, status=status.HTTP_404_NOT_FOUND)
 
         return Response({"order_count": order_count}, status=status.HTTP_200_OK)
 
@@ -88,7 +89,7 @@ class CompletedOrderCountView(APIView):
 
         # Check if the business user exists
         if not Profile.objects.filter(user=business_user_id).exists():
-            return Response({"error": "Business user not found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"detail": ["Business user not found."]}, status=status.HTTP_404_NOT_FOUND)
 
         return Response({"completed_order_count": completed_order_count}, status=status.HTTP_200_OK)
 
@@ -203,12 +204,94 @@ class OfferViewSet(viewsets.ModelViewSet):
     Handles CRUD operations for offers.
     """
     queryset = Offer.objects.all()
+    # queryset = Offer.objects.prefetch_related('details').select_related('user')
     serializer_class = OfferSerializer
     permission_classes = [IsBusinessUserOrReadOnly, IsOwnerOrReadOnly]
     pagination_class = LargeResultsSetPagination
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     ordering_fields = ['updated_at', 'min_price']
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    # filterset_fields = ['min_price']
+    
     search_fields = ['title', 'description']
+
+    def get_queryset(self):
+        # Optimiert das Laden der OfferDetail-Objekte
+  
+        queryset = super().get_queryset()
+
+        # Annotate the queryset with min_price and min_delivery_time
+        queryset = queryset.annotate(
+            min_price=Min('details__price'),
+            min_delivery_time=Min('details__delivery_time_in_days')
+        )
+
+        # Filter by search term if specified
+        search = self.request.query_params.get('search')
+        if search:
+            queryset = queryset.filter(
+                Q(title__icontains=search) | Q(description__icontains=search)
+            )
+
+
+        # Filter by max_delivery_time if specified
+        max_delivery_time = self.request.query_params.get('max_delivery_time')
+        if max_delivery_time is not None:
+            try:
+                max_delivery_time = int(max_delivery_time)
+                queryset = queryset.filter(min_delivery_time__lte=max_delivery_time)
+            except ValueError:
+                pass  # Ignore invalid input for max_delivery_time
+
+        # Filter by min_price if specified
+        min_price = self.request.query_params.get('min_price')
+        if min_price is not None:
+            try:
+                min_price = int(min_price)
+                queryset = queryset.filter(min_price__lte=min_price)
+            except ValueError:
+                pass  # Ignore invalid input for max_delivery_time
+
+        # Filter by creator_id if specified
+        creator_id = self.request.query_params.get('creator_id')
+        if creator_id is not None:
+            try:
+                queryset = queryset.filter(user_id=int(creator_id))
+            except ValueError:
+                pass  # Ignore invalid input for creator_id
+
+        return queryset
+
+
+
+    def list(self, request, *args, **kwargs):
+        # Überprüfen, ob ein Suchbegriff vorhanden ist
+        """
+        Handles filtering, pagination, and optional removal of the `page` parameter.
+        """
+        # Check whether search or filter parameters are available
+        search_query = request.query_params.get('search', '').strip()
+        # page_param = request.query_params.get('page', '').strip()
+        # max_delivery_time = request.query_params.get('max_delivery_time').strip()
+        max_delivery_time = request.query_params.get('max_delivery_time', '').strip()
+        page = request.query_params.get('page', '').strip()
+        page = int(page) if page else 1
+
+        if not search_query and not max_delivery_time:
+            return super().list(request, *args, **kwargs)
+
+        # Execute the QuerySet to count the filtered results
+        filtered_queryset = self.filter_queryset(self.get_queryset())
+        total_results = filtered_queryset.count()
+        # Get the page size from the pagination class or the defaults
+        page_size = getattr(self.pagination_class(), 'page_size', 6)
+        # If the number of pages is greater than the total number of pages due to the result, set `page` to 1
+        if page > ceil(total_results / page_size):
+            request.query_params._mutable = True  # Set QueryDict to mutable
+            request.query_params.pop('page', 1)  # set `page` to 1
+            request.query_params._mutable = False  # Set QueryDict to unmutable again
+        # Call up standard logic
+        response = super().list(request, *args, **kwargs)
+        return response
 
     def create(self, request, *args, **kwargs):
         """
@@ -317,7 +400,7 @@ class BusinessProfilesView(APIView):
                 serializer = BusinessSerializer(profile)
                 return Response(serializer.data, status=status.HTTP_200_OK)
             except Profile.DoesNotExist:
-                return Response({"error": "Profile not found"}, status=status.HTTP_404_NOT_FOUND)
+                return Response({"detail": ["Profile not found"]}, status=status.HTTP_404_NOT_FOUND)
 
         # Otherwise, list all business profiles
         business_profiles = Profile.objects.filter(type="business")
@@ -337,7 +420,7 @@ class CustomerProfilesView(APIView):
                 serializer = CustomerSerializer(profile)
                 return Response(serializer.data, status=status.HTTP_200_OK)
             except Profile.DoesNotExist:
-                return Response({"error": "Profile not found"}, status=status.HTTP_404_NOT_FOUND)
+                return Response({"detail": ["Profile not found"]}, status=status.HTTP_404_NOT_FOUND)
 
         # Otherwise, list all customer profiles
         business_profiles = Profile.objects.filter(type="customer")

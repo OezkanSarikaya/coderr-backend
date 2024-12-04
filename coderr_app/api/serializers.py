@@ -6,6 +6,9 @@ from django.urls import reverse
 from django.db.models import Min
 from rest_framework.exceptions import ValidationError
 from rest_framework import status
+from django.db.models import Min
+from django.db import models
+from django.utils.html import strip_tags
 
 
 class OfferDetailLinkSerializer(serializers.ModelSerializer):
@@ -67,7 +70,7 @@ class OrderSerializer(serializers.ModelSerializer):
         write_only=True, required=False  # `offer_detail_id` only needed for create
     )
     # Custom field to ensure price is output as a number (decimal, not string)
-    price = serializers.DecimalField(max_digits=10, decimal_places=2, coerce_to_string=False)
+    price = serializers.DecimalField(max_digits=10, decimal_places=2, coerce_to_string=False, read_only=True)
 
 
     class Meta:
@@ -88,18 +91,18 @@ class OrderSerializer(serializers.ModelSerializer):
         """
         request = self.context.get('request')
         if not request or not request.user.is_authenticated:
-            raise serializers.ValidationError({"Der Benutzer muss angemeldet sein."}, code=status.HTTP_401_UNAUTHORIZED)
+            raise serializers.ValidationError({"detail": ["Der Benutzer muss angemeldet sein."]}, code=status.HTTP_401_UNAUTHORIZED)
 
         # Only `customer_user` are allowed to create an order
         if request.method == 'POST':
             if not hasattr(request.user, 'profile') or request.user.profile.type != 'customer':
-                raise serializers.ValidationError({"detail": "Nur Benutzer mit Kundenprofil können Bestellungen erstellen"}, code=status.HTTP_403_FORBIDDEN)
+                raise serializers.ValidationError({"detail": ["Nur Benutzer mit Kundenprofil können Bestellungen erstellen"]}, code=status.HTTP_403_FORBIDDEN)
 
         # Only `business_user` are allowed to update an order
         if request.method in ['PUT', 'PATCH']:
             order = self.instance
             if not (request.user == order.business_user):
-                raise serializers.ValidationError({"detail": "Sie haben keine Berechtigung diese Bestellung zu bearbeiten"}, code=status.HTTP_403_FORBIDDEN)
+                raise serializers.ValidationError({"detail": ["Sie haben keine Berechtigung diese Bestellung zu bearbeiten"]}, code=status.HTTP_403_FORBIDDEN)
 
                    
                 
@@ -114,8 +117,12 @@ class OrderSerializer(serializers.ModelSerializer):
         customer_user = request.user
         offer_detail_id = validated_data.pop('offer_detail_id', None)
 
-        # Ensure the OfferDetail exists
-        offer_detail = OfferDetail.objects.get(id=offer_detail_id)
+       # Ensure the OfferDetail exists
+        try:
+            offer_detail = OfferDetail.objects.get(id=offer_detail_id)
+        except OfferDetail.DoesNotExist:
+            raise serializers.ValidationError({"offer_detail_id": ["Angebotsdetail mit dieser ID existiert nicht."]})
+
 
         # Create the order
         order = Order.objects.create(
@@ -166,6 +173,14 @@ class UserSerializer(serializers.ModelSerializer):
     """
     Define fields for user
     """
+
+    def validate_first_name(self, value):
+        """Clean HTML tags from first_name."""
+        return strip_tags(value)
+
+    def validate_last_name(self, value):
+        """Clean HTML tags from last_name."""
+        return strip_tags(value)
     class Meta:
         model = User
         fields = ['pk', 'first_name', 'last_name', 'username']
@@ -246,51 +261,72 @@ class CustomerSerializer(serializers.ModelSerializer):
             'uploaded_at': representation['uploaded_at'],
             'type': representation['type'],
         }
+    
+
 
 class OfferSerializer(serializers.ModelSerializer):
     """
     Offer serializer for both creating and fetching offers.
     """
-    details = OfferDetailSerializer(many=True, read_only=True)  # Details werden nur im GET-Request zurückgegeben
+    details = OfferDetailSerializer(many=True, read_only=True)
+    min_price = serializers.SerializerMethodField()
+    min_delivery_time = serializers.SerializerMethodField()
+    # user_details = serializers.SerializerMethodField()
     user_details = UserSerializer(source='user', read_only=True)
 
     class Meta:
         model = Offer
-        fields = ['id', 'title', 'image', 'description', 'details', 'user_details']  # Füge `user_details` hier hinzu, um den Fehler zu beheben.
+        fields = [
+            'id', 'user', 'title', 'image', 'description', 'created_at', 'updated_at',
+            'details', 'min_price', 'min_delivery_time', 'user_details'
+        ]
+      
+    
+
+    def get_min_price(self, obj):
+        """
+        Calculate the minimum price from the associated OfferDetails.
+        """
+        min_price = obj.details.aggregate(min_price=Min('price'))['min_price']
+        return float(min_price) if min_price is not None else None
+
+    def get_min_delivery_time(self, obj):
+        """
+        Calculate the minimum delivery time from the associated OfferDetails.
+        """
+        min_delivery_time = obj.details.aggregate(min_delivery_time=Min('delivery_time_in_days'))['min_delivery_time']
+        return int(min_delivery_time) if min_delivery_time is not None else None
+
+
 
     def __init__(self, *args, **kwargs):
+        """
+        Dynamically adjust fields based on the request method.
+        """
         super().__init__(*args, **kwargs)
         request = self.context.get('request')
-        if request and request.method in ['POST', 'PUT', 'PATCH']:
-            self.fields['details'] = OfferDetailSerializer(many=True, write_only=False)
-        elif request and request.method == 'GET':
-            self.fields['details'] = OfferDetailLinkSerializer(many=True, read_only=True)
+        if request:
+            if request.method in ['POST', 'PUT', 'PATCH']:
+                self.fields['details'] = OfferDetailSerializer(many=True)
+            elif request.method == 'GET':
+                self.fields['details'] = OfferDetailLinkSerializer(many=True, read_only=True)
 
     def to_representation(self, instance):
         """
-        Überschreibt die Standard-Darstellung des Response-Objekts für PATCH-Requests.
+        Customize the representation of the response object.
         """
-        # Standard-Darstellung ohne Min-Preis und Min-Delivery-Time
         representation = super().to_representation(instance)
 
+        # Remove fields conditionally for non-GET methods
+        request = self.context.get('request')
+        if request and request.method in ['POST', 'PATCH']:
+            representation.pop('min_price', None)
+            representation.pop('min_delivery_time', None)
+            representation.pop('user_details', None)
 
-        # Details ID-List für jedes Detail
-        details = representation.get('details', [])
-        for detail in details:
-            detail['id'] = detail['id']  # Hier wird die Detail-ID hinzugefügt
-
-        # Entferne nicht gewünschte Felder wie min_price und min_delivery_time
-        representation.pop('min_price', None)
-        representation.pop('min_delivery_time', None)
-
-        # Entferne `user_details` aus der Darstellung für PATCH
-        if 'user_details' in representation:
-            representation.pop('user_details')
-
-        # Entferne leere Felder wie `image` und `description`, wenn sie nicht im Payload enthalten sind
+        # Adjust fields as needed
         if 'image' in representation and representation['image'] is None:
             representation.pop('image')
-
         if 'description' in representation and representation['description'] is None:
             representation.pop('description')
 
@@ -298,33 +334,20 @@ class OfferSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         """
-        Create an Offer and its associated OfferDetails with validation for three required details.
+        Create an Offer and its associated OfferDetails.
         """
         details_data = validated_data.pop('details', [])
         user = self.context['request'].user
 
-        # Ensure `user` isn't passed twice
-        if 'user' in validated_data:
-            del validated_data['user']
-
-        errors = {}
-
-        # Validate the number of details
+        # Validation: Ensure exactly 3 details with specific offer_types
         if len(details_data) != 3:
-            errors['details'] = ["Es müssen genau 3 Angebotsdetails übergeben werden."]
-        
-        # Validate the offer_types
-        required_offer_types = {'basic', 'standard', 'premium'}
-        offer_types = {detail['offer_type'] for detail in details_data}
-        if offer_types != required_offer_types:
-            errors['details'] = errors.get('details', []) + [
-                "Die Angebotsdetails müssen genau eines der folgenden offer_type beinhalten: 'basic', 'standard' und 'premium'."
-            ]
+            raise ValidationError({"details": ["Es müssen genau 3 Angebotsdetails übergeben werden."]})
 
-        if errors:
-            raise ValidationError(errors)
+        offer_types = {detail.get('offer_type') for detail in details_data}
+        if offer_types != {'basic', 'standard', 'premium'}:
+            raise ValidationError({"details": ["Die 3 Angebotsdetails müssen die Typen 'basic', 'standard' und 'premium' enthalten."]})
 
-        # Create the offer
+        # Create the Offer
         offer = Offer.objects.create(user=user, **validated_data)
 
         # Create associated OfferDetails
@@ -332,23 +355,24 @@ class OfferSerializer(serializers.ModelSerializer):
             OfferDetail.objects.create(offer=offer, **detail_data)
 
         return offer
-    
+
     def update(self, instance, validated_data):
-        # Aktualisieren der Felder des Offer
-        instance.title = validated_data.get('title', instance.title)
-        instance.image = validated_data.get('image', instance.image)
-        instance.description = validated_data.get('description', instance.description)
+        """
+        Update an existing Offer and its associated OfferDetails.
+        """
+        # Update Offer fields
+        for attr, value in validated_data.items():
+            if attr != 'details':
+                setattr(instance, attr, value)
         instance.save()
 
-        # Verarbeite die verschachtelten 'details' Daten
+        # Update OfferDetails
         details_data = validated_data.get('details', [])
-
-        # Lösche die alten Details (optional, je nachdem, wie du es handhaben möchtest)
-        instance.details.all().delete()
-
-        # Erstelle die neuen Details
-        for detail_data in details_data:
-            OfferDetail.objects.create(offer=instance, **detail_data)
+        if details_data:
+            # Clear old details and add new ones
+            instance.details.all().delete()
+            for detail_data in details_data:
+                OfferDetail.objects.create(offer=instance, **detail_data)
 
         return instance
 
@@ -357,11 +381,9 @@ class ProfileSerializer(serializers.ModelSerializer):
     """
     Defines fields for profile and include nested user data
     """
-    user = serializers.PrimaryKeyRelatedField(
-        queryset=User.objects.all())  # ID des Users
+    user = serializers.PrimaryKeyRelatedField(queryset=User.objects.all())  # ID of user
     username = serializers.CharField(source="user.username", read_only=True)
-    first_name = serializers.CharField(
-        source="user.first_name", read_only=True)
+    first_name = serializers.CharField(source="user.first_name", read_only=True)
     last_name = serializers.CharField(source="user.last_name", read_only=True)
     file = serializers.FileField(required=False)
 
@@ -384,6 +406,18 @@ class ProfileSerializer(serializers.ModelSerializer):
         extra_kwargs = {
             'file': {'required': False}
         }
+
+    def validate_description(self, value):
+        """Clean HTML tags from description field."""
+        return strip_tags(value)
+
+    def validate_location(self, value):
+        """Clean HTML tags from location field."""
+        return strip_tags(value)
+
+    def validate_working_hours(self, value):
+        """Clean HTML tags from working_hours field."""
+        return strip_tags(value)
 
     def to_representation(self, instance):
         representation = super().to_representation(instance)

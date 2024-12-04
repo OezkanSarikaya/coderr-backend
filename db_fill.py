@@ -9,6 +9,7 @@ from django.contrib.auth.models import User
 from coderr_app.models import Profile, Offer, OfferDetail, Order, Review
 from django.db import transaction
 import random
+from rest_framework.authtoken.models import Token
 
 def create_users():
     """Erstellt Beispiel-Benutzer mit Profilen."""
@@ -31,6 +32,8 @@ def create_users():
         )
     
     business_users.append(user)
+    # Token explizit erstellen
+    Token.objects.get_or_create(user=user)
     
     user = User.objects.create_user(
             username=f'Kunde',
@@ -47,6 +50,7 @@ def create_users():
         )
     
     customer_users.append(user)
+    Token.objects.get_or_create(user=user)
 
     for i in range(3):  # 3 Business-Benutzer
         user = User.objects.create_user(
@@ -63,6 +67,7 @@ def create_users():
             email=user.email
         )
         business_users.append(user)
+        Token.objects.get_or_create(user=user)
 
     for i in range(3):  # 3 Kunden-Benutzer
         user = User.objects.create_user(
@@ -79,6 +84,7 @@ def create_users():
             email=user.email
         )
         customer_users.append(user)
+        Token.objects.get_or_create(user=user)
 
     return business_users, customer_users
 
