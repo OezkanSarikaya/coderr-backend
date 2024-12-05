@@ -83,9 +83,9 @@ class Offer(models.Model):
     """
     user = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name='offers')
-    title = models.CharField(max_length=255, blank=True, null=True)
+    title = models.CharField(max_length=255)
     image = models.FileField(upload_to='offer_images/', blank=True, null=True)
-    description = models.TextField(blank=True, null=True)
+    description = models.TextField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -19,7 +19,7 @@ class OfferDetailLinkSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = OfferDetail
-        fields = ['id', 'url','title']
+        fields = ['id', 'url', 'title']
 
     def get_url(self, obj):
         # Dynamically create the URL path for each OfferDetail object
@@ -145,28 +145,36 @@ class OfferDetailSerializer(serializers.ModelSerializer):
     Validates OfferDetails
     """
     offer_type = serializers.ChoiceField(choices=['basic', 'standard', 'premium'])
+
     class Meta:
         model = OfferDetail
         fields = ['id', 'title', 'revisions', 'delivery_time_in_days',
                   'price', 'features', 'offer_type']
 
     def validate(self, data):
+        errors = {}
+
         # Revisions must not be below -1
-        if data['revisions'] < -1:
-            raise serializers.ValidationError(
-                "Revisions must be -1 or greater.")
+        revisions = data.get('revisions')
+        if revisions is not None and revisions < -1:
+            errors['revisions'] = "Revisions must be -1 or greater."
 
         # The delivery time must be positive
-        if data['delivery_time_in_days'] <= 0:
-            raise serializers.ValidationError(
-                "Delivery time must be a positive integer.")
+        delivery_time = data.get('delivery_time_in_days')
+        if delivery_time is not None and delivery_time <= 0:
+            errors['delivery_time_in_days'] = "Delivery time must be a positive integer."
 
         # Features must have at least one entry
-        if not data['features']:
-            raise serializers.ValidationError(
-                "Mindestens ein Feature muss angegeben werden.")
+        features = data.get('features')
+        if features is not None and not features:
+            errors['features'] = "Mindestens ein Feature muss angegeben werden."
+
+        # Raise ValidationError if there are any errors
+        if errors:
+            raise serializers.ValidationError(errors)
 
         return data
+
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -265,13 +273,10 @@ class CustomerSerializer(serializers.ModelSerializer):
 
 
 class OfferSerializer(serializers.ModelSerializer):
-    """
-    Offer serializer for both creating and fetching offers.
-    """
-    details = OfferDetailSerializer(many=True, read_only=True)
+    details = OfferDetailSerializer(many=True)  # Für POST verwenden wir den vollständigen Detail-Serializer
     min_price = serializers.SerializerMethodField()
     min_delivery_time = serializers.SerializerMethodField()
-    # user_details = serializers.SerializerMethodField()
+    user = serializers.PrimaryKeyRelatedField(read_only=True)
     user_details = UserSerializer(source='user', read_only=True)
 
     class Meta:
@@ -280,77 +285,72 @@ class OfferSerializer(serializers.ModelSerializer):
             'id', 'user', 'title', 'image', 'description', 'created_at', 'updated_at',
             'details', 'min_price', 'min_delivery_time', 'user_details'
         ]
-      
-    
 
     def get_min_price(self, obj):
-        """
-        Calculate the minimum price from the associated OfferDetails.
-        """
         min_price = obj.details.aggregate(min_price=Min('price'))['min_price']
         return float(min_price) if min_price is not None else None
 
     def get_min_delivery_time(self, obj):
-        """
-        Calculate the minimum delivery time from the associated OfferDetails.
-        """
         min_delivery_time = obj.details.aggregate(min_delivery_time=Min('delivery_time_in_days'))['min_delivery_time']
         return int(min_delivery_time) if min_delivery_time is not None else None
 
-
-
     def __init__(self, *args, **kwargs):
-        """
-        Dynamically adjust fields based on the request method.
-        """
         super().__init__(*args, **kwargs)
         request = self.context.get('request')
-        if request:
-            if request.method in ['POST', 'PUT', 'PATCH']:
-                self.fields['details'] = OfferDetailSerializer(many=True)
-            elif request.method == 'GET':
-                self.fields['details'] = OfferDetailLinkSerializer(many=True, read_only=True)
+        if request and request.method in ['POST', 'PUT', 'PATCH']:
+            self.fields['details'] = OfferDetailSerializer(many=True)  # Für POST verwenden wir den vollständigen Serializer
+        elif request and request.method == 'GET':
+            self.fields['details'] = OfferDetailLinkSerializer(many=True, read_only=True)  # Für GET verwenden wir den Link-Serializer
 
-    def to_representation(self, instance):
-        """
-        Customize the representation of the response object.
-        """
-        representation = super().to_representation(instance)
+    # def validate(self, data):
+    #     """
+    #     Validiert die Felder im Angebot.
+    #     """
+    #     errors = {}
 
-        # Remove fields conditionally for non-GET methods
-        request = self.context.get('request')
-        if request and request.method in ['POST', 'PATCH']:
-            representation.pop('min_price', None)
-            representation.pop('min_delivery_time', None)
-            representation.pop('user_details', None)
+    #     # Optional: Überprüfe, ob title und description im Payload enthalten sind
+    #     if 'title' in data and not data.get('title'):
+    #         errors['title'] = ["Das Feld 'title' muss ausgefüllt sein."]
+        
+    #     if 'description' in data and not data.get('description'):
+    #         errors['description'] = ["Das Feld 'description' muss ausgefüllt sein."]
 
-        # Adjust fields as needed
-        if 'image' in representation and representation['image'] is None:
-            representation.pop('image')
-        if 'description' in representation and representation['description'] is None:
-            representation.pop('description')
+    #     # Überprüfen, ob Details im Payload enthalten sind und validiere sie
+    #     if 'details' in data:
+    #         details = data.get('details', [])
+    #         if len(details) != 3:
+    #             errors['details'] = ['Es müssen genau 3 Angebotsdetails übergeben werden.']
+    #         else:
+    #             # Prüfen, ob die angebotenen Details die richtigen Typen haben
+    #             offer_types = {detail.get('offer_type') for detail in details}
+    #             if offer_types != {'basic', 'standard', 'premium'}:
+    #                 errors['details'] = ["Die 3 Angebotsdetails müssen die Typen 'basic', 'standard' und 'premium' enthalten."]
 
-        return representation
+    #     # Wenn Fehler vorhanden sind, raise ValidationError
+    #     if errors:
+    #         raise serializers.ValidationError(errors)
+
+    #     return data
+
 
     def create(self, validated_data):
         """
-        Create an Offer and its associated OfferDetails.
+        Erstelle ein Angebot und die zugehörigen Angebotsdetails.
         """
         details_data = validated_data.pop('details', [])
-        user = self.context['request'].user
 
-        # Validation: Ensure exactly 3 details with specific offer_types
+        # Prüfen, ob genau 3 Details vorhanden sind
         if len(details_data) != 3:
-            raise ValidationError({"details": ["Es müssen genau 3 Angebotsdetails übergeben werden."]})
+            raise serializers.ValidationError({"details": ["Es müssen genau 3 Angebotsdetails übergeben werden."]})
 
         offer_types = {detail.get('offer_type') for detail in details_data}
         if offer_types != {'basic', 'standard', 'premium'}:
-            raise ValidationError({"details": ["Die 3 Angebotsdetails müssen die Typen 'basic', 'standard' und 'premium' enthalten."]})
+            raise serializers.ValidationError({"details": ["Die 3 Angebotsdetails müssen die Typen 'basic', 'standard' und 'premium' enthalten."]})
 
-        # Create the Offer
-        offer = Offer.objects.create(user=user, **validated_data)
+        # Erstelle das Angebot
+        offer = Offer.objects.create(**validated_data)
 
-        # Create associated OfferDetails
+        # Erstelle die zugehörigen Angebotsdetails
         for detail_data in details_data:
             OfferDetail.objects.create(offer=offer, **detail_data)
 
@@ -358,23 +358,34 @@ class OfferSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         """
-        Update an existing Offer and its associated OfferDetails.
+        Update das bestehende Angebot.
         """
-        # Update Offer fields
-        for attr, value in validated_data.items():
-            if attr != 'details':
-                setattr(instance, attr, value)
-        instance.save()
+        details_data = validated_data.pop('details', None)
 
-        # Update OfferDetails
-        details_data = validated_data.get('details', [])
-        if details_data:
-            # Clear old details and add new ones
+        # Wenn Details im PATCH enthalten sind, dann aktualisieren
+        if details_data is not None:
+            # if len(details_data) != 3:
+            #     raise serializers.ValidationError({"details": ["Es müssen genau 3 Angebotsdetails übergeben werden."]})
+
+            # offer_types = {detail.get('offer_type') for detail in details_data}
+            # if offer_types != {'basic', 'standard', 'premium'}:
+            #     raise serializers.ValidationError({"details": ["Die 3 Angebotsdetails müssen die Typen 'basic', 'standard' und 'premium' enthalten."]})
+
+            # Entferne alle bestehenden Details und füge die neuen hinzu
             instance.details.all().delete()
             for detail_data in details_data:
                 OfferDetail.objects.create(offer=instance, **detail_data)
 
+        # Aktualisiere die Felder des Angebots
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
         return instance
+
+
+
+
 
 
 class ProfileSerializer(serializers.ModelSerializer):

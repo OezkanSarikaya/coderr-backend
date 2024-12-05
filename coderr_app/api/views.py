@@ -198,25 +198,104 @@ class OrderViewSet(viewsets.ModelViewSet):
             customer_user=user) | Order.objects.filter(business_user=user)
         return queryset.order_by('-created_at')
 
+class OfferDetailView(APIView):
+    permission_classes = [IsAuthenticated, IsOwnerOrReadOnly]
+
+    def get_object(self, pk):
+        """
+        Holen Sie sich das Angebot anhand der ID.
+        """
+        try:
+            return Offer.objects.get(pk=pk)
+        except Offer.DoesNotExist:
+            raise Response({"detail": ["Angebot nicht gefunden."]}, status=status.HTTP_404_NOT_FOUND)
+        
+    def patch(self, request, pk, format=None):
+        """
+        Partielle Aktualisierung von Offer und OfferDetails.
+        """
+        offer = self.get_object(pk)
+
+        # Überprüfen, ob der angemeldete Benutzer der Eigentümer ist
+        if offer.user != request.user:
+            return Response({"detail": "Sie sind nicht der Eigentümer dieses Angebots."}, status=status.HTTP_403_FORBIDDEN)
+
+        # Angebot aktualisieren (nur Felder aus dem Payload)
+        offer_data = {key: value for key, value in request.data.items() if key != 'details'}
+        offer_serializer = OfferSerializer(offer, data=offer_data, partial=True)
+
+        if offer_serializer.is_valid():
+            offer_serializer.save()
+        else:
+            return Response(offer_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        # Details aktualisieren (falls im Payload enthalten)
+        updated_details = []
+        details_data = request.data.get('details', [])
+
+        for detail_data in details_data:
+            offer_type = detail_data.get('offer_type')
+            if not offer_type:
+                return Response({"details": "Jedes Angebotsdetail muss einen 'offer_type' enthalten."}, status=status.HTTP_400_BAD_REQUEST)
+
+            try:
+                # Bestehendes Detail aktualisieren
+                detail = OfferDetail.objects.get(offer=offer, offer_type=offer_type)
+                detail_serializer = OfferDetailSerializer(detail, data=detail_data, partial=True)
+                if detail_serializer.is_valid():
+                    detail_serializer.save()
+                    updated_detail = {key: detail_serializer.data[key] for key in detail_data.keys()}
+                    updated_detail['id'] = detail.id  # ID hinzufügen
+                    updated_details.append(updated_detail)
+                else:
+                    return Response(detail_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            except OfferDetail.DoesNotExist:
+                # Neues Detail erstellen
+                detail_data['offer'] = offer.id
+                detail_serializer = OfferDetailSerializer(data=detail_data)
+                if detail_serializer.is_valid():
+                    detail_serializer.save()
+                    updated_detail = {key: detail_serializer.data[key] for key in detail_data.keys()}
+                    updated_detail['id'] = detail_serializer.instance.id  # ID hinzufügen
+                    updated_details.append(updated_detail)
+                else:
+                    return Response(detail_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        # Response zurückgeben
+        offer_response = {key: offer_serializer.data[key] for key in offer_data.keys()}
+        offer_response['id'] = offer.id  # Offer-ID hinzufügen
+        if details_data:
+            offer_response['details'] = updated_details
+
+        return Response(offer_response, status=status.HTTP_200_OK)
+
+    def delete(self, request, pk, format=None):
+        """
+        Löschen Sie das Angebot nur, wenn der Benutzer der Eigentümer ist.
+        """
+        offer = self.get_object(pk)
+        
+        # Überprüfen, ob der angemeldete Benutzer der Eigentümer des Angebots ist
+        if offer.user != request.user:
+            return Response({"detail": ["Sie sind nicht der Eigentümer dieses Angebots."]}, status=status.HTTP_403_FORBIDDEN)
+        
+        # Löschen des Angebots
+        offer.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 class OfferViewSet(viewsets.ModelViewSet):
     """
     Handles CRUD operations for offers.
     """
     queryset = Offer.objects.all()
-    # queryset = Offer.objects.prefetch_related('details').select_related('user')
     serializer_class = OfferSerializer
     permission_classes = [IsBusinessUserOrReadOnly, IsOwnerOrReadOnly]
     pagination_class = LargeResultsSetPagination
     ordering_fields = ['updated_at', 'min_price']
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    # filterset_fields = ['min_price']
-    
     search_fields = ['title', 'description']
 
     def get_queryset(self):
-        # Optimiert das Laden der OfferDetail-Objekte
-  
         queryset = super().get_queryset()
 
         # Annotate the queryset with min_price and min_delivery_time
@@ -225,15 +304,14 @@ class OfferViewSet(viewsets.ModelViewSet):
             min_delivery_time=Min('details__delivery_time_in_days')
         )
 
-        # Filter by search term if specified
+        # Handle search filters
         search = self.request.query_params.get('search')
         if search:
             queryset = queryset.filter(
                 Q(title__icontains=search) | Q(description__icontains=search)
             )
 
-
-        # Filter by max_delivery_time if specified
+        # Additional filters for delivery time, price, etc.
         max_delivery_time = self.request.query_params.get('max_delivery_time')
         if max_delivery_time is not None:
             try:
@@ -242,7 +320,6 @@ class OfferViewSet(viewsets.ModelViewSet):
             except ValueError:
                 pass  # Ignore invalid input for max_delivery_time
 
-        # Filter by min_price if specified
         min_price = self.request.query_params.get('min_price')
         if min_price is not None:
             try:
@@ -251,7 +328,6 @@ class OfferViewSet(viewsets.ModelViewSet):
             except ValueError:
                 pass  # Ignore invalid input for max_delivery_time
 
-        # Filter by creator_id if specified
         creator_id = self.request.query_params.get('creator_id')
         if creator_id is not None:
             try:
@@ -261,17 +337,11 @@ class OfferViewSet(viewsets.ModelViewSet):
 
         return queryset
 
-
-
     def list(self, request, *args, **kwargs):
-        # Überprüfen, ob ein Suchbegriff vorhanden ist
         """
         Handles filtering, pagination, and optional removal of the `page` parameter.
         """
-        # Check whether search or filter parameters are available
         search_query = request.query_params.get('search', '').strip()
-        # page_param = request.query_params.get('page', '').strip()
-        # max_delivery_time = request.query_params.get('max_delivery_time').strip()
         max_delivery_time = request.query_params.get('max_delivery_time', '').strip()
         page = request.query_params.get('page', '').strip()
         page = int(page) if page else 1
@@ -282,49 +352,62 @@ class OfferViewSet(viewsets.ModelViewSet):
         # Execute the QuerySet to count the filtered results
         filtered_queryset = self.filter_queryset(self.get_queryset())
         total_results = filtered_queryset.count()
-        # Get the page size from the pagination class or the defaults
         page_size = getattr(self.pagination_class(), 'page_size', 6)
-        # If the number of pages is greater than the total number of pages due to the result, set `page` to 1
+
         if page > ceil(total_results / page_size):
             request.query_params._mutable = True  # Set QueryDict to mutable
             request.query_params.pop('page', 1)  # set `page` to 1
             request.query_params._mutable = False  # Set QueryDict to unmutable again
-        # Call up standard logic
-        response = super().list(request, *args, **kwargs)
-        return response
+        
+        return super().list(request, *args, **kwargs)
 
     def create(self, request, *args, **kwargs):
         """
         Override create to customize the response with full details.
         """
         serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)  # Validate the incoming data
+        serializer.is_valid(raise_exception=True)  # Validate incoming data
         self.perform_create(serializer)
 
-        # Fetch the created offer instance
         offer = serializer.instance
 
-        # Use OfferSerializer with full details for the response
+        # Return a response with custom fields and offer details
         response_serializer = OfferSerializer(offer, context={'request': request})
 
-        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+        return Response({
+            "id": response_serializer.data['id'],
+            "title": response_serializer.data['title'],
+            "image": response_serializer.data.get('image'),
+            "description": response_serializer.data['description'],
+            "details": OfferDetailSerializer(offer.details.all(), many=True).data
+        }, status=status.HTTP_201_CREATED)
 
     def perform_create(self, serializer):
         """
         Save the offer with the associated details.
         """
-        serializer.save()
+        serializer.save(user=self.request.user)
 
-    def patch(self, request, *args, **kwargs):
+    def update(self, request, *args, **kwargs):
         """
         Custom PATCH method to return only the necessary fields in the response.
         """
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
+
+        # Perform the update and return the custom response
         self.perform_update(serializer)
 
+        # Manually update the response data to match the format you expect
+        # return Response({
+        #     "id": instance.id,
+        #     "title": instance.title,
+        #     "details": OfferDetailSerializer(instance.details.all(), many=True).data
+        # })
         return Response(serializer.data)
+    
+
 
 class ProfileViewSet(viewsets.ModelViewSet):
     """

@@ -44,18 +44,24 @@ python -m venv env
 pip install -r requirements.txt
 ```
 
-### 4. Migrate the database
+### 4. Create .env file in your root folder and add secret_key
+```bash
+SECRET_KEY='your_secret_key'
+```
+Note: No spaces before or after the equal sign
+
+### 5. Migrate the database
 ```bash
 python manage.py makemigrations
 python manage.py migrate
 ```
 
-### 5. Populate the database with test data and a guest account
+### 6. Populate the database with test data and a guest account
 ```bash
 python db_fill.py
 ```
 
-### 6. Start the server
+### 7. Start the server
 ```bash
 python manage.py runserver
 ```

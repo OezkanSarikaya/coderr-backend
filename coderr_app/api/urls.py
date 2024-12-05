@@ -11,7 +11,7 @@ and reviews. It also provides utility endpoints like order counts and base infor
 
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import ProfileViewSet, BusinessProfilesView, CustomerProfilesView, OfferViewSet, OrderViewSet, OfferDetailsViewSet, ReviewViewSet, OrderCountView, CompletedOrderCountView, BaseInfo
+from .views import ProfileViewSet, BusinessProfilesView, CustomerProfilesView, OfferViewSet, OrderViewSet, OfferDetailsViewSet, ReviewViewSet, OrderCountView, CompletedOrderCountView, BaseInfo, OfferDetailView
 
 # Create a router for standard viewsets
 router = DefaultRouter()
@@ -57,4 +57,7 @@ urlpatterns = [
 
     # Endpoint for general application base information
     path('base-info/', BaseInfo.as_view(), name='base-info'),
+#     path('offers/<int:pk>/', OfferDetailView.as_view(), name='offer-detail'),
+   
+    
 ]
