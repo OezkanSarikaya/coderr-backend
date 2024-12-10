@@ -302,35 +302,6 @@ class OfferSerializer(serializers.ModelSerializer):
         elif request and request.method == 'GET':
             self.fields['details'] = OfferDetailLinkSerializer(many=True, read_only=True)  # Für GET verwenden wir den Link-Serializer
 
-    # def validate(self, data):
-    #     """
-    #     Validiert die Felder im Angebot.
-    #     """
-    #     errors = {}
-
-    #     # Optional: Überprüfe, ob title und description im Payload enthalten sind
-    #     if 'title' in data and not data.get('title'):
-    #         errors['title'] = ["Das Feld 'title' muss ausgefüllt sein."]
-        
-    #     if 'description' in data and not data.get('description'):
-    #         errors['description'] = ["Das Feld 'description' muss ausgefüllt sein."]
-
-    #     # Überprüfen, ob Details im Payload enthalten sind und validiere sie
-    #     if 'details' in data:
-    #         details = data.get('details', [])
-    #         if len(details) != 3:
-    #             errors['details'] = ['Es müssen genau 3 Angebotsdetails übergeben werden.']
-    #         else:
-    #             # Prüfen, ob die angebotenen Details die richtigen Typen haben
-    #             offer_types = {detail.get('offer_type') for detail in details}
-    #             if offer_types != {'basic', 'standard', 'premium'}:
-    #                 errors['details'] = ["Die 3 Angebotsdetails müssen die Typen 'basic', 'standard' und 'premium' enthalten."]
-
-    #     # Wenn Fehler vorhanden sind, raise ValidationError
-    #     if errors:
-    #         raise serializers.ValidationError(errors)
-
-    #     return data
 
 
     def create(self, validated_data):
@@ -364,13 +335,6 @@ class OfferSerializer(serializers.ModelSerializer):
 
         # Wenn Details im PATCH enthalten sind, dann aktualisieren
         if details_data is not None:
-            # if len(details_data) != 3:
-            #     raise serializers.ValidationError({"details": ["Es müssen genau 3 Angebotsdetails übergeben werden."]})
-
-            # offer_types = {detail.get('offer_type') for detail in details_data}
-            # if offer_types != {'basic', 'standard', 'premium'}:
-            #     raise serializers.ValidationError({"details": ["Die 3 Angebotsdetails müssen die Typen 'basic', 'standard' und 'premium' enthalten."]})
-
             # Entferne alle bestehenden Details und füge die neuen hinzu
             instance.details.all().delete()
             for detail_data in details_data:

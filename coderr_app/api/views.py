@@ -399,12 +399,7 @@ class OfferViewSet(viewsets.ModelViewSet):
         # Perform the update and return the custom response
         self.perform_update(serializer)
 
-        # Manually update the response data to match the format you expect
-        # return Response({
-        #     "id": instance.id,
-        #     "title": instance.title,
-        #     "details": OfferDetailSerializer(instance.details.all(), many=True).data
-        # })
+
         return Response(serializer.data)
     
 
